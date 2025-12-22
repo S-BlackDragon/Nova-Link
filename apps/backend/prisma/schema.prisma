@@ -1,0 +1,114 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+model User {
+  id              String         @id @default(uuid())
+  username           String         @unique
+  email              String         @unique
+  passwordHash       String
+  isVerified         Boolean        @default(false)
+  verificationCode   String?
+  verificationExpires DateTime?
+  resetToken         String?
+  resetExpires       DateTime?
+  curseforgeToken    String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  ownedGroups     Group[]        @relation("GroupOwner")
+  memberships     GroupMember[]
+  authoredPacks   Modpack[]
+}
+
+model Group {
+  id              String         @id @default(uuid())
+  name            String
+  ownerId         String
+  inviteCode      String         @unique @default(cuid())
+  targetModpackId String?
+  targetVersionId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  owner           User           @relation("GroupOwner", fields: [ownerId], references: [id])
+  targetModpack   Modpack?       @relation(fields: [targetModpackId], references: [id], onDelete: SetNull)
+  targetVersion   ModpackVersion? @relation("GroupTargetVersion", fields: [targetVersionId], references: [id], onDelete: SetNull)
+  members         GroupMember[]
+}
+
+model GroupMember {
+  id        String   @id @default(uuid())
+  groupId   String
+  userId    String
+  role      Role     @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+}
+
+model Modpack {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  authorId    String
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  author      User     @relation(fields: [authorId], references: [id])
+  versions    ModpackVersion[]
+  groups      Group[]
+}
+
+model ModpackVersion {
+  id              String   @id @default(uuid())
+  modpackId       String
+  versionNumber   String
+  gameVersion     String?
+  loaderType      String?  // e.g., "forge", "fabric", "neoforge"
+  loaderVersion   String?
+  manifestUrl     String?
+  parentVersionId String?
+  isPublished     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  modpack         Modpack  @relation(fields: [modpackId], references: [id], onDelete: Cascade)
+  parentVersion   ModpackVersion? @relation("VersionHistory", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions   ModpackVersion[] @relation("VersionHistory")
+  
+  activeGroups    Group[] @relation("GroupTargetVersion")
+  mods            Mod[]
+
+  @@unique([modpackId, versionNumber])
+}
+
+model Mod {
+  id                String   @id @default(uuid())
+  modpackVersionId  String
+  modrinthId        String
+  name              String
+  versionId         String?  // Modrinth version ID
+  iconUrl           String?
+  projectType       String   @default("mod")
+  enabled           Boolean  @default(true)
+  
+  version           ModpackVersion @relation(fields: [modpackVersionId], references: [id], onDelete: Cascade)
+}

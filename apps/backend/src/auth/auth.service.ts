@@ -1,0 +1,243 @@
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import validate from 'deep-email-validator';
+import { CreateAuthDto } from './dto/create-auth.dto';
+import { LoginDto } from './dto/login.dto';
+import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+    private mailService: MailService,
+  ) { }
+
+  async validateEmail(email: string) {
+    // Check email format first with regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return { valid: false, reason: 'Invalid email format' };
+    }
+
+    // Check if email already exists in database
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    if (existingUser) {
+      return { valid: false, reason: 'Email already registered' };
+    }
+
+    // List of known valid email providers (common ones)
+    const knownProviders = [
+      'gmail.com', 'googlemail.com',
+      'yahoo.com', 'yahoo.es', 'yahoo.com.mx',
+      'outlook.com', 'outlook.es', 'hotmail.com', 'hotmail.es', 'live.com', 'msn.com',
+      'icloud.com', 'me.com', 'mac.com',
+      'protonmail.com', 'proton.me',
+      'aol.com',
+      'zoho.com',
+      'mail.com',
+      'gmx.com', 'gmx.net',
+      'yandex.com', 'yandex.ru',
+    ];
+
+    const domain = email.split('@')[1]?.toLowerCase();
+
+    // If it's a known provider, accept immediately
+    if (knownProviders.includes(domain)) {
+      return { valid: true, reason: 'Email is valid' };
+    }
+
+    // For unknown domains, validate with deep-email-validator
+    try {
+      const emailValidation = await validate({
+        email,
+        validateRegex: true,
+        validateMx: true,
+        validateTypo: true,
+        validateDisposable: true,
+        validateSMTP: false,
+      });
+
+      if (!emailValidation.valid) {
+        const reason = emailValidation.reason || 'Invalid email address';
+        // Translate common error reasons
+        const reasonTranslations: Record<string, string> = {
+          'mx': 'Email domain does not exist',
+          'regex': 'Invalid email format',
+          'disposable': 'Disposable emails are not allowed',
+          'typo': 'Possible typo in email address',
+        };
+        return { valid: false, reason: reasonTranslations[reason] || reason };
+      }
+
+      return { valid: true, reason: 'Email is valid' };
+    } catch (error) {
+      // If validation fails for technical reasons, reject by default for security
+      return { valid: false, reason: 'Could not verify email domain' };
+    }
+  }
+
+  async register(createAuthDto: CreateAuthDto) {
+    // 1. Validate if email is real/existing (no SMTP - it's slow and unreliable)
+    const emailValidation = await validate({
+      email: createAuthDto.email,
+      validateRegex: true,
+      validateMx: true,
+      validateTypo: true,
+      validateDisposable: true,
+      validateSMTP: false, // SMTP is slow and often fails for valid emails
+    });
+
+    if (!emailValidation.valid) {
+      const reason = emailValidation.reason || 'Invalid email address';
+      throw new BadRequestException(`Email verification failed: ${reason}. Please use a real, active email.`);
+    }
+
+    // 2. Check for existing user
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: createAuthDto.email },
+          { username: createAuthDto.username },
+        ],
+      },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User already exists with this email or username');
+    }
+
+    // 3. Create user and send code
+    const hashedPassword = await bcrypt.hash(createAuthDto.password, 12);
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 1);
+
+    const user = await this.prisma.user.create({
+      data: {
+        username: createAuthDto.username,
+        email: createAuthDto.email,
+        passwordHash: hashedPassword,
+        verificationCode,
+        verificationExpires: expires,
+        isVerified: false,
+      },
+    });
+
+    await this.mailService.sendVerificationEmail(user.email, user.username, verificationCode);
+
+    return {
+      message: 'Registration successful. Please check your email for the verification code.',
+      email: user.email,
+    };
+  }
+
+  async verifyEmail(email: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user || user.verificationCode !== code) {
+      throw new BadRequestException('Invalid verification code');
+    }
+
+    if (user.verificationExpires && user.verificationExpires < new Date()) {
+      throw new BadRequestException('Verification code expired');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isVerified: true,
+        verificationCode: null,
+        verificationExpires: null,
+      },
+    });
+
+    return this.login({ identifier: email, password: '' }, true);
+  }
+
+  async login(loginDto: LoginDto, bypassPassword = false) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: loginDto.identifier },
+          { username: loginDto.identifier },
+        ],
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.isVerified) {
+      throw new UnauthorizedException('Email not verified. Please verify your email first.');
+    }
+
+    if (!bypassPassword) {
+      const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+    }
+
+    const payload = { sub: user.id, username: user.username };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+      user: { id: user.id, username: user.username, email: user.email },
+    };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return { message: 'If an account exists with this email, a reset link has been sent.' };
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 1);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken,
+        resetExpires: expires,
+      },
+    });
+
+    await this.mailService.sendPasswordResetEmail(user.email, user.username, resetToken);
+
+    return { message: 'If an account exists with this email, a reset link has been sent.' };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        resetToken: token,
+        resetExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: hashedPassword,
+        resetToken: null,
+        resetExpires: null,
+      },
+    });
+
+    return { message: 'Password reset successful. You can now login with your new password.' };
+  }
+}
