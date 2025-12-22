@@ -33,6 +33,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [installingModpack, setInstallingModpack] = useState<string | null>(null);
   const [deletingModpack, setDeletingModpack] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [msProfile, setMsProfile] = useState<{ name: string } | null>(null);
   const { setLaunchingInfo, launching: globalLaunching, isRunning, activePackId } = useLogs();
 
@@ -229,6 +230,37 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
+  const handleCheckUpdate = async () => {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      // Setup listeners for one-time check
+      const cleanupAvailable = (window as any).api.updater.onUpdateAvailable(() => {
+        setCheckingUpdate(false);
+        // Modal will open automatically via App.tsx or UpdateModal logic
+      });
+      const cleanupNotAvailable = (window as any).api.updater.onUpdateNotAvailable(() => {
+        setCheckingUpdate(false);
+        alert('You are on the latest version!');
+        cleanupAvailable();
+        cleanupNotAvailable();
+        cleanupError();
+      });
+      const cleanupError = (window as any).api.updater.onUpdateError((err: any) => {
+        setCheckingUpdate(false);
+        alert('Update check failed: ' + (err.message || 'Unknown error'));
+        cleanupAvailable();
+        cleanupNotAvailable();
+        cleanupError();
+      });
+
+      await (window as any).api.updater.checkForUpdates();
+    } catch (err) {
+      console.error('Failed to check for updates:', err);
+      setCheckingUpdate(false);
+    }
+  };
+
   const copyToClipboard = (e: React.MouseEvent, text: string) => {
     e.stopPropagation();
     navigator.clipboard.writeText(text);
@@ -294,8 +326,16 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
             {msProfile ? `Xbox: ${msProfile.name}` : 'Xbox: Not Connected'}
           </div>
 
-          <div className="mt-3 text-center">
-            <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.20</span>
+          <div className="mt-3 text-center space-y-2">
+            <span className="block text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.20</span>
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              className="text-[10px] font-bold text-slate-500 hover:text-emerald-500 transition-colors flex items-center justify-center gap-1 mx-auto disabled:opacity-50"
+            >
+              {checkingUpdate ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+              {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+            </button>
           </div>
         </div>
       </aside>

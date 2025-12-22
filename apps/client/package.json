@@ -69,7 +69,7 @@
     "appId": "com.novalink.launcher",
     "productName": "Nova Link",
     "forceCodeSigning": false,
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Nova.Link-${version}-${os}-${arch}.${ext}",
     "files": [
       "out/**/*",
       "node_modules/**/*",
