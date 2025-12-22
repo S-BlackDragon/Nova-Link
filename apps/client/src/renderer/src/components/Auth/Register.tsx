@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { UserPlus, Mail, Lock, User, Loader2, AlertCircle, ArrowRight, ShieldCheck, ShieldClose } from 'lucide-react';
+import { Mail, Lock, User, Loader2, AlertCircle, ArrowRight, ShieldCheck, ShieldClose } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
+import NovaLinkIcon from '../NovaLinkIcon';
 
 interface RegisterProps {
     onRegisterSuccess: (email: string) => void;
@@ -43,7 +45,7 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
 
         const timeoutId = setTimeout(async () => {
             try {
-                const response = await axios.post('http://127.0.0.1:3000/auth/validate-email', { email });
+                const response = await axios.post(`${API_BASE_URL}/auth/validate-email`, { email });
                 setEmailValidation({
                     isValidating: false,
                     isValid: response.data.valid,
@@ -94,7 +96,7 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
         setLoading(true);
 
         try {
-            await axios.post('http://127.0.0.1:3000/auth/register', {
+            await axios.post(`${API_BASE_URL}/auth/register`, {
                 username,
                 email,
                 password,
@@ -112,7 +114,7 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
             <div className="bg-slate-900/40 backdrop-blur-2xl border border-white/5 p-10 rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.6)]">
                 <div className="text-center mb-10">
                     <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-purple-500/20 transform hover:scale-110 transition-transform duration-500">
-                        <UserPlus className="text-white w-8 h-8" />
+                        <NovaLinkIcon className="text-white drop-shadow-lg" size={32} />
                     </div>
                     <h1 className="text-3xl font-black text-white mb-2 tracking-tight">Create Account</h1>
                     <p className="text-slate-400 font-medium">Join the modpack community today</p>
@@ -279,7 +281,7 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
                 </form>
 
                 <div className="mt-8 text-center border-t border-white/5 pt-8">
-                    <p className="text-slate-400 font-medium text-sm">
+                    <p className="text-slate-400 font-medium text-sm mb-6">
                         Already have an account?{' '}
                         <button
                             onClick={onSwitchToLogin}
@@ -288,6 +290,9 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
                             Login here
                         </button>
                     </p>
+                    <div className="pt-6 border-t border-white/5">
+                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.18</span>
+                    </div>
                 </div>
             </div>
         </div>

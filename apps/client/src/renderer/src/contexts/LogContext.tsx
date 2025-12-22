@@ -25,7 +25,14 @@ export function LogProvider({ children }: { children: React.ReactNode }) {
         if (!(window as any).api) return;
 
         const handleLog = (_event: any, message: string) => {
-            setLogs(prev => [...prev, message]);
+            setLogs(prev => {
+                const newLogs = [...prev, message];
+                // Keep only last 1000 lines to prevent UI slowdown
+                if (newLogs.length > 1000) {
+                    return newLogs.slice(-1000);
+                }
+                return newLogs;
+            });
         };
 
         const handleStatus = (_event: any, data: any) => {
@@ -44,16 +51,28 @@ export function LogProvider({ children }: { children: React.ReactNode }) {
             setProgress(0);
         };
 
+        const handleSyncComplete = () => {
+            // Auto-hide progress after sync completes
+            setTimeout(() => {
+                setProgress(0);
+                setStatus('');
+            }, 2000);
+        };
+
         const removeLog = (window as any).api.onLaunchLog(handleLog);
         const removeStatus = (window as any).api.onLaunchStatus(handleStatus);
         const removeClose = (window as any).api.onLaunchClose(handleClose);
         const removeRunning = (window as any).api.onLaunchRunning(handleRunning);
+
+        // Listen for sync completion to auto-hide progress
+        const removeSyncComplete = (window as any).api.onSyncComplete?.(handleSyncComplete);
 
         return () => {
             removeLog?.();
             removeStatus?.();
             removeClose?.();
             removeRunning?.();
+            removeSyncComplete?.();
         };
     }, []);
 

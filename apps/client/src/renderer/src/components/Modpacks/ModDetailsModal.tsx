@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { X, Download, ExternalLink, Calendar, User, DownloadCloud, Info, History, Image as ImageIcon, Layers, Loader2, Check, Tag, Link as LinkIcon, FileText, Globe, AlertCircle } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface ModDetailsModalProps {
     projectId: string;
@@ -28,8 +29,8 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
             setLoading(true);
             try {
                 const [projRes, versRes] = await Promise.all([
-                    axios.get(`http://127.0.0.1:3000/modrinth/project/${projectId}`),
-                    axios.get(`http://127.0.0.1:3000/modrinth/project/${projectId}/versions`, {
+                    axios.get(`${API_BASE_URL}/modrinth/project/${projectId}`),
+                    axios.get(`${API_BASE_URL}/modrinth/project/${projectId}/versions`, {
                         params: { gameVersion, loader }
                     })
                 ]);

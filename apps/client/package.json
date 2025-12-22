@@ -1,6 +1,6 @@
 {
   "name": "nova-link",
-  "version": "1.0.0",
+  "version": "1.0.19",
   "description": "Nova Link - Minecraft Modpack Launcher",
   "productName": "Nova Link",
   "main": "./out/main/index.js",
@@ -24,7 +24,9 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@tanstack/react-query": "^5.90.12",
     "@types/fs-extra": "^11.0.4",
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.2",
     "electron-log": "^5.2.4",
     "electron-updater": "^6.3.9",
@@ -42,6 +44,7 @@
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/adm-zip": "^0.5.7",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -65,6 +68,7 @@
   "build": {
     "appId": "com.novalink.launcher",
     "productName": "Nova Link",
+    "forceCodeSigning": false,
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
       "out/**/*",
@@ -97,8 +101,8 @@
       "category": "Utility"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Package, Plus, Loader2, X, ChevronDown, Layers, Terminal } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface ModpackCreatorProps {
     userId: string;
@@ -38,14 +39,14 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
         setError(null);
         try {
             // 1. Create Modpack
-            const modpackResponse = await axios.post('http://127.0.0.1:3000/modpacks', {
+            const modpackResponse = await axios.post(`${API_BASE_URL}/modpacks`, {
                 name,
                 description,
                 authorId: userId
             });
 
             // 2. Create Initial Version
-            await axios.post(`http://127.0.0.1:3000/modpacks/${modpackResponse.data.id}/versions`, {
+            await axios.post(`${API_BASE_URL}/modpacks/${modpackResponse.data.id}/versions`, {
                 versionNumber: '1.0.0',
                 gameVersion,
                 loaderType: loader.toLowerCase(),

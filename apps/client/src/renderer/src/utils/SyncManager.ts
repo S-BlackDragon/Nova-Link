@@ -17,8 +17,10 @@ export interface Manifest {
     mods: ModInfo[];
 }
 
+import { API_BASE_URL } from '../config/api';
+
 export class SyncManager {
-    private static readonly API_BASE = 'http://127.0.0.1:3000';
+    private static readonly API_BASE = API_BASE_URL;
 
     static async getManifest(versionId: string): Promise<Manifest> {
         const response = await axios.get(`${this.API_BASE}/modpacks/versions/${versionId}/manifest`);

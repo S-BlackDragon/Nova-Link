@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Database Service
+  postgres:
+    image: postgres:16-alpine
+    container_name: nova_link_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-launcher_db}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - nova_network
+
+  # Backend Service
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: nova_link_api
+    restart: always
+    ports:
+      - '3000:3000'
+    environment:
+      # Database connection string (internal docker network)
+      DATABASE_URL: postgresql://${DB_USER:-admin}:${DB_PASSWORD:-password}@postgres:5432/${DB_NAME:-launcher_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-supersecretkey}
+      # Add other env vars here (SMTP, etc.)
+    depends_on:
+      - postgres
+    networks:
+      - nova_network
+
+volumes:
+  postgres_data:
+
+
+networks:
+  nova_network:
+    driver: bridge

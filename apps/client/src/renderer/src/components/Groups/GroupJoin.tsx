@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Users, ArrowRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface GroupJoinProps {
     userId: string;
@@ -21,7 +22,7 @@ export default function GroupJoin({ userId, onJoined, onCancel }: GroupJoinProps
         setLoading(true);
         setError(null);
         try {
-            const response = await axios.post(`http://127.0.0.1:3000/groups/join`, {
+            const response = await axios.post(`${API_BASE_URL}/groups/join`, {
                 userId,
                 inviteCode
             });

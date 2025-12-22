@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Package, Users, Settings as SettingsIcon, LogOut, Plus, LayoutDashboard, Compass, Loader2, Play, Shield, Copy, Check, Trash2, ExternalLink, ChevronDown, Square } from 'lucide-react';
+import NovaLinkIcon from './NovaLinkIcon';
+import { API_BASE_URL } from '../config/api';
 import ModSearch from './Modpacks/ModSearch';
 import GroupJoin from './Groups/GroupJoin';
 import GroupCreator from './Groups/GroupCreator';
 import ModpackCreator from './Modpacks/ModpackCreator';
 import GroupDetails from './Groups/GroupDetails';
 import ModpackDetails from './Modpacks/ModpackDetails';
+import ModpackSelector from './Modpacks/ModpackSelector';
 import Settings from './Settings';
 import { useLogs } from '../contexts/LogContext';
 
@@ -22,12 +25,27 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [showCreateModpack, setShowCreateModpack] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedModpackId, setSelectedModpackId] = useState<string | null>(null);
+  const [selectedMod, setSelectedMod] = useState<any | null>(null);
   const [modpacks, setModpacks] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [loadingModpacks, setLoadingModpacks] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [installingModpack, setInstallingModpack] = useState<string | null>(null);
+  const [msProfile, setMsProfile] = useState<{ name: string } | null>(null);
   const { setLaunchingInfo, launching: globalLaunching, isRunning, activePackId } = useLogs();
+
+  useEffect(() => {
+    const handleNav = () => setActiveTab('settings');
+    window.addEventListener('navigate-settings', handleNav);
+    return () => window.removeEventListener('navigate-settings', handleNav);
+  }, []);
+
+  // Load Microsoft profile on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('ms_profile');
+    if (stored) setMsProfile(JSON.parse(stored));
+  }, [activeTab]);
 
   const navItems = [
     { id: 'modpacks', label: 'My Modpacks', icon: LayoutDashboard },
@@ -40,7 +58,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     if (!user?.id) return;
     setLoadingModpacks(true);
     try {
-      const response = await axios.get(`http://127.0.0.1:3000/modpacks/user/${user.id}`);
+      const response = await axios.get(`${API_BASE_URL}/modpacks/user/${user.id}`);
       setModpacks(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error('Failed to fetch modpacks:', err);
@@ -53,7 +71,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     if (!user?.id) return;
     setLoadingGroups(true);
     try {
-      const response = await axios.get(`http://127.0.0.1:3000/groups`, {
+      const response = await axios.get(`${API_BASE_URL}/groups`, {
         params: { userId: user.id }
       });
       setGroups(Array.isArray(response.data) ? response.data : []);
@@ -97,17 +115,73 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
       console.log('Launching with options:', options);
       setLaunchingInfo({ id: pack.id, launching: true });
+      await (window as any).api.launchMinecraft(options);
+    } catch (err) {
+      console.error('Failed to launch:', err);
+      setLaunchingInfo({ id: pack.id, launching: false });
+    }
+  };
 
-      const result = await (window as any).api.launchMinecraft(options);
-      if (!result.success) {
-        setLaunchingInfo({ id: null, launching: false });
-        console.error('Launch failed:', result.error);
-        alert(`Failed to launch: ${result.error}`);
-      }
-    } catch (err: any) {
-      setLaunchingInfo({ id: null, launching: false });
-      console.error('Failed to launch Minecraft:', err);
-      alert(`Error: ${err.message}`);
+  const handleInstallModpack = async (mod: any) => {
+    if (installingModpack) return; // Prevent double-click
+
+    console.log('Auto-installing modpack:', mod);
+    setInstallingModpack(mod.project_id || mod.slug);
+
+    const gameVersion = mod.game_versions?.[0] || '1.20.1';
+    const loader = mod.loaders?.find((l: string) => l.toLowerCase() === 'fabric') || mod.loaders?.[0] || 'fabric';
+
+    try {
+      // 1. Create Modpack on Backend
+      const modpackResponse = await axios.post(`${API_BASE_URL}/modpacks`, {
+        name: mod.title,
+        description: mod.description,
+        authorId: user.id
+      });
+
+      // 2. Create Version
+      const versionResponse = await axios.post(`${API_BASE_URL}/modpacks/${modpackResponse.data.id}/versions`, {
+        versionNumber: '1.0.0',
+        gameVersion: gameVersion,
+        loaderType: loader.toLowerCase(),
+        loaderVersion: 'latest'
+      });
+
+      // 3. Add the Modpack-Project as a "Mod" to the version
+      // CRITICAL: projectType tells the sync engine to treat this as an .mrpack
+      await axios.post(`${API_BASE_URL}/modpacks/versions/${versionResponse.data.id}/mods`, {
+        modrinthId: mod.project_id || mod.slug,
+        name: mod.title,
+        iconUrl: mod.icon_url,
+        projectType: 'modpack',
+        versionId: null
+      });
+
+      // 4. Create Local Instance & Sync
+      const settingsStr = localStorage.getItem('mc_settings');
+      const settings = settingsStr ? JSON.parse(settingsStr) : {};
+      const mcPath = settings.mcPath || 'C:\\Minecraft';
+
+      await (window as any).api.createInstance({ rootPath: mcPath, modpackName: mod.title });
+
+      // 5. Sync modpack files (download .mrpack and extract)
+      await (window as any).api.syncModpack({
+        versionId: versionResponse.data.id,
+        modpackName: mod.title,
+        rootPath: mcPath,
+        gameVersion: gameVersion,
+        loaderType: loader.toLowerCase()
+      });
+
+      // 6. Switch to modpacks tab and refresh
+      setActiveTab('modpacks');
+      await fetchModpacks();
+
+    } catch (err) {
+      console.error('Failed to auto-install modpack:', err);
+      alert('Failed to install modpack. Please check console for details.');
+    } finally {
+      setInstallingModpack(null);
     }
   };
 
@@ -132,7 +206,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       }
 
       // Delete from backend
-      await axios.delete(`http://127.0.0.1:3000/modpacks/${id}`);
+      await axios.delete(`${API_BASE_URL}/modpacks/${id}`);
       fetchModpacks();
     } catch (err) {
       console.error('Failed to delete modpack:', err);
@@ -144,7 +218,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     e.stopPropagation();
     if (!window.confirm('Are you sure you want to delete this group?')) return;
     try {
-      await axios.delete(`http://127.0.0.1:3000/groups/${id}`);
+      await axios.delete(`${API_BASE_URL}/groups/${id}`);
       fetchGroups();
     } catch (err) {
       console.error('Failed to delete group:', err);
@@ -164,7 +238,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       <aside className="w-80 bg-slate-900/40 backdrop-blur-3xl border-r border-white/5 flex flex-col flex-shrink-0 z-20 relative">
         <div className="p-10 flex items-center gap-4">
           <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-500/20">
-            <Package className="text-white w-7 h-7" />
+            <NovaLinkIcon className="text-white drop-shadow-lg" size={28} />
           </div>
           <span className="font-black text-2xl tracking-tighter text-white">Nova Link</span>
         </div>
@@ -209,6 +283,16 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
             <LogOut className="w-5 h-5" />
             <span>Sign Out</span>
           </button>
+
+          {/* Microsoft Account Status */}
+          <div className={`mt-4 flex items-center justify-center gap-2 text-xs font-bold ${msProfile ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <div className={`w-2 h-2 rounded-full ${msProfile ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+            {msProfile ? `Xbox: ${msProfile.name}` : 'Xbox: Not Connected'}
+          </div>
+
+          <div className="mt-3 text-center">
+            <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.19</span>
+          </div>
         </div>
       </aside>
 
@@ -283,7 +367,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Game Version</span>
                                 <span className="text-lg font-black text-slate-200">{pack.versions?.[0]?.gameVersion || 'N/A'}</span>
                               </div>
-                              <div className="flex flex-col gap-1 items-end">
+                              <div className="flex flex-col items-end gap-1">
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Loader</span>
                                 <span className="text-lg font-black text-slate-200 capitalize">{pack.versions?.[0]?.loaderType || 'Vanilla'}</span>
                               </div>
@@ -350,7 +434,13 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
           {activeTab === 'search' && (
             <div>
-              <ModSearch userId={user?.id} />
+              <ModSearch
+                onAddMod={(mod) => {
+                  setSelectedMod(mod);
+                }}
+                onInstallModpack={handleInstallModpack}
+                installingId={installingModpack}
+              />
             </div>
           )}
 
@@ -494,6 +584,18 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         />
       )}
 
+      {selectedMod && (
+        <ModpackSelector
+          userId={user?.id}
+          mod={selectedMod}
+          onClose={() => setSelectedMod(null)}
+          onSuccess={() => {
+            setSelectedMod(null);
+            fetchModpacks();
+          }}
+        />
+      )}
+
       {selectedModpackId && (
         <ModpackDetails
           modpackId={selectedModpackId}
@@ -502,6 +604,25 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
             fetchModpacks();
           }}
         />
+      )}
+
+      {/* Global Progress Indicator */}
+      {(globalLaunching || (useLogs().progress > 0 && useLogs().progress < 100)) && (
+        <div className="fixed bottom-6 right-6 z-[100] bg-slate-900 border border-indigo-500/30 p-4 rounded-2xl shadow-2xl flex flex-col gap-2 w-80 animate-in slide-in-from-bottom duration-300">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+              <span className="text-sm font-bold text-white truncate max-w-[150px]">{useLogs().status || 'Processing...'}</span>
+            </div>
+            <span className="text-xs font-black text-indigo-400">{useLogs().progress}%</span>
+          </div>
+          <div className="w-full h-1.5 bg-indigo-500/10 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 transition-all duration-300"
+              style={{ width: `${useLogs().progress}%` }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import log from 'electron-log'
 
@@ -92,7 +92,7 @@ export class UpdateService {
 
         // Quit and install update
         try {
-            autoUpdater.quitAndInstall(false, true)
+            autoUpdater.quitAndInstall(true, true)
         } catch (error: any) {
             log.error('Error installing update:', error)
             this.sendToRenderer('update-error', {
@@ -128,6 +128,9 @@ export class UpdateService {
      * Setup electron-updater event handlers
      */
     private setupEventHandlers(): void {
+        // Clear default listeners to avoid native dialogs
+        autoUpdater.removeAllListeners()
+
         // When starting to check for updates
         autoUpdater.on('checking-for-update', () => {
             log.info('Event: checking-for-update')
@@ -187,28 +190,14 @@ export class UpdateService {
      * Show dialog when update is ready
      * Offers "Install Now" or "Later" options
      */
+    /**
+     * Show dialog when update is ready
+     * Offers "Install Now" or "Later" options
+     */
     private showUpdateReadyDialog(version: string): void {
-        if (!this.mainWindow || this.mainWindow.isDestroyed()) {
-            return
-        }
-
-        // Don't show dialog in some cases (let UI handle it)
-        // This is a fallback in case UI doesn't show modal
-        const response = dialog.showMessageBoxSync(this.mainWindow, {
-            type: 'info',
-            title: 'Update Ready',
-            message: `Nova Link v${version} is ready to install.`,
-            detail: 'The update will be installed when you close the app, or you can install it now.',
-            buttons: ['Install Later', 'Install Now'],
-            defaultId: 1,
-            cancelId: 0
-        })
-
-        if (response === 1) {
-            // User clicked "Install Now"
-            this.installUpdateNow()
-        }
-        // If 0 (Install Later), do nothing - autoInstallOnAppQuit handles it
+        // Native dialog removed in favor of in-app UI (UpdateModal)
+        // The 'update-downloaded' event sent above triggers the UI modal.
+        log.info(`Update v${version} ready for install (waiting for user action via UI)`)
     }
 
     /**

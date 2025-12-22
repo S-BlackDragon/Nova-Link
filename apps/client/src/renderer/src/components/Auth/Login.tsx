@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { User, Lock, LogIn, Loader2, AlertCircle, ArrowRight } from 'lucide-react';
+import { User, Lock, Loader2, AlertCircle, ArrowRight } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
+import NovaLinkIcon from '../NovaLinkIcon';
 
 interface LoginProps {
     onLoginSuccess: (token: string, user: any) => void;
@@ -20,7 +22,7 @@ export default function Login({ onLoginSuccess, onSwitchToRegister, onForgotPass
         setLoading(true);
 
         try {
-            const response = await axios.post('http://127.0.0.1:3000/auth/login', {
+            const response = await axios.post(`${API_BASE_URL}/auth/login`, {
                 identifier,
                 password,
             });
@@ -39,7 +41,7 @@ export default function Login({ onLoginSuccess, onSwitchToRegister, onForgotPass
             <div className="bg-slate-900/40 backdrop-blur-2xl border border-white/5 p-12 rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.6)]">
                 <div className="text-center mb-12">
                     <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-indigo-500/20 transform hover:scale-110 transition-transform duration-500">
-                        <LogIn className="text-white w-10 h-10" />
+                        <NovaLinkIcon className="text-white drop-shadow-lg" size={40} />
                     </div>
                     <h1 className="text-4xl font-black text-white mb-3 tracking-tight">Welcome Back</h1>
                     <p className="text-slate-400 font-medium">Manage your modpacks with ease</p>
@@ -122,6 +124,9 @@ export default function Login({ onLoginSuccess, onSwitchToRegister, onForgotPass
                             Register here
                         </button>
                     </p>
+                    <div className="mt-6 pt-6 border-t border-white/5">
+                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.18</span>
+                    </div>
                 </div>
             </div>
         </div>

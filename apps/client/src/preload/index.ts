@@ -18,10 +18,20 @@ const api = {
   isInstanceRunning: (modpackName: string) => electronAPI.ipcRenderer.invoke('is-instance-running', modpackName),
   openFolder: (path: string) => electronAPI.ipcRenderer.invoke('open-folder', path),
   listMods: (options: { rootPath: string, modpackName: string, type?: string }) => electronAPI.ipcRenderer.invoke('list-mods', options),
+
+  // Microsoft Authentication
+  microsoftLogin: () => electronAPI.ipcRenderer.invoke('microsoft-login'),
+
   onLaunchLog: (callback: any) => {
     const subscription = (_event: any, message: any) => callback(_event, message);
     electronAPI.ipcRenderer.on('launcher-log', subscription);
     return () => electronAPI.ipcRenderer.removeListener('launcher-log', subscription);
+  },
+
+  onSyncComplete: (callback: any) => {
+    const subscription = () => callback();
+    electronAPI.ipcRenderer.on('sync-complete', subscription);
+    return () => electronAPI.ipcRenderer.removeListener('sync-complete', subscription);
   },
 
   // Update API

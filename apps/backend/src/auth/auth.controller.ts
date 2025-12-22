@@ -36,9 +36,14 @@ export class AuthController {
     return this.authService.forgotPassword(forgotPasswordDto.email);
   }
 
+  @Post('verify-reset-code')
+  verifyResetCode(@Body() verifyDto: { email: string; code: string }) {
+    return this.authService.verifyResetCode(verifyDto.email, verifyDto.code);
+  }
+
   @Post('reset-password')
   resetPassword(@Body() resetDto: ResetPasswordDto) {
-    return this.authService.resetPassword(resetDto.token, resetDto.newPassword);
+    return this.authService.resetPassword(resetDto.email, resetDto.code, resetDto.newPassword);
   }
 
   @UseGuards(JwtAuthGuard)

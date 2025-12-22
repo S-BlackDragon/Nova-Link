@@ -2,7 +2,7 @@ import { useUpdater } from '../hooks/useUpdater'
 import { Download, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react'
 
 export default function UpdateModal() {
-    const { status, version, progress, error, installNow } = useUpdater()
+    const { status, version, progress, error, installNow, dismissUpdate } = useUpdater()
 
     // Don't show modal for idle, checking, available, or not-available states
     if (status === 'idle' || status === 'checking' || status === 'available' || status === 'not-available') {
@@ -100,7 +100,7 @@ export default function UpdateModal() {
                         {/* Secondary: Install Later */}
                         <button
                             onClick={() => {
-                                // Just close modal - update will install on app quit
+                                if (dismissUpdate) dismissUpdate()
                             }}
                             className="w-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-bold py-4 rounded-2xl transition-all duration-300 border border-white/10 active:scale-[0.97]"
                         >

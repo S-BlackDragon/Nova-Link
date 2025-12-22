@@ -139,9 +139,14 @@ export function useUpdater() {
         }
     }
 
+    const dismissUpdate = () => {
+        setState(prev => ({ ...prev, status: 'idle' }))
+    }
+
     return {
         ...state,
         checkForUpdates,
-        installNow
+        installNow,
+        dismissUpdate
     }
 }

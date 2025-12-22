@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { ShieldCheck, Lock, Loader2, AlertCircle, ArrowRight, ShieldClose, Ticket } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface ResetPasswordProps {
     onSuccess: () => void;
@@ -42,7 +43,7 @@ export default function ResetPassword({ onSuccess }: ResetPasswordProps) {
         setMessage('');
 
         try {
-            const response = await axios.post('http://127.0.0.1:3000/auth/reset-password', {
+            const response = await axios.post(`${API_BASE_URL}/auth/reset-password`, {
                 token,
                 newPassword: password,
             });

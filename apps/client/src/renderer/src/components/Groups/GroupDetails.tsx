@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Users, Shield, Copy, Check, X, Plus, Trash2, Loader2, ExternalLink } from 'lucide-react';
+import { Package, Shield, Copy, Check, X, Plus, Trash2, Loader2 } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface GroupDetailsProps {
     groupId: string;
@@ -19,8 +20,8 @@ export default function GroupDetails({ groupId, userId, onClose }: GroupDetailsP
         const fetchData = async () => {
             try {
                 const [groupRes, packsRes] = await Promise.all([
-                    axios.get(`http://127.0.0.1:3000/groups/${groupId}`),
-                    axios.get(`http://127.0.0.1:3000/modpacks/user/${userId}`)
+                    axios.get(`${API_BASE_URL}/groups/${groupId}`),
+                    axios.get(`${API_BASE_URL}/modpacks/user/${userId}`)
                 ]);
                 setGroup(groupRes.data);
                 setMyModpacks(packsRes.data);
@@ -42,11 +43,11 @@ export default function GroupDetails({ groupId, userId, onClose }: GroupDetailsP
     const handleSetModpack = async (packId: string) => {
         setUpdating(true);
         try {
-            await axios.patch(`http://127.0.0.1:3000/groups/${groupId}`, {
+            await axios.patch(`${API_BASE_URL}/groups/${groupId}`, {
                 targetModpackId: packId
             });
             // Refresh group data
-            const groupRes = await axios.get(`http://127.0.0.1:3000/groups/${groupId}`);
+            const groupRes = await axios.get(`${API_BASE_URL}/groups/${groupId}`);
             setGroup(groupRes.data);
         } catch (err) {
             console.error('Failed to update group modpack:', err);
@@ -147,8 +148,8 @@ export default function GroupDetails({ groupId, userId, onClose }: GroupDetailsP
                                             onClick={() => handleSetModpack(pack.id)}
                                             disabled={updating || group.targetModpackId === pack.id}
                                             className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${group.targetModpackId === pack.id
-                                                    ? 'bg-indigo-600 border-indigo-500 text-white'
-                                                    : 'bg-white/[0.02] border-white/5 text-slate-400 hover:border-indigo-500/30 hover:text-white'
+                                                ? 'bg-indigo-600 border-indigo-500 text-white'
+                                                : 'bg-white/[0.02] border-white/5 text-slate-400 hover:border-indigo-500/30 hover:text-white'
                                                 }`}
                                         >
                                             <span className="font-bold truncate">{pack.name}</span>

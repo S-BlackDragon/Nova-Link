@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Trash2, X, Loader2, ExternalLink, AlertCircle, Eye, EyeOff, Search, Terminal, Play, Square, Folder, RotateCw } from 'lucide-react';
+import { Package, Trash2, X, Loader2, AlertCircle, Eye, EyeOff, Search, Terminal, Play, Square, Folder, RotateCw } from 'lucide-react';
 import LauncherConsole from '../LauncherConsole';
 import ModSearch from './ModSearch';
 import ModDetailsModal from './ModDetailsModal';
 import { useLogs } from '../../contexts/LogContext';
+import { API_BASE_URL } from '../../config/api';
 
 interface ModpackDetailsProps {
     modpackId: string;
@@ -26,13 +27,15 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
     const [activeContentType, setActiveContentType] = useState<ContentType>('mod');
     const [diskFiles, setDiskFiles] = useState<string[]>([]);
     const [detailedModId, setDetailedModId] = useState<string | null>(null);
+    const [pathNotification, setPathNotification] = useState(false);
+    const [authNotification, setAuthNotification] = useState(false);
 
     const launching = localLaunching || (globalLaunching && activePackId === modpackId);
 
     const fetchDetails = async () => {
         setLoading(true);
         try {
-            const response = await axios.get(`http://127.0.0.1:3000/modpacks/${modpackId}`);
+            const response = await axios.get(`${API_BASE_URL}/modpacks/${modpackId}`);
             setModpack(response.data);
             await Promise.all([
                 fetchDiskFiles(response.data, activeContentType),
@@ -117,7 +120,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     const handleRemoveMod = async (modId: string) => {
         try {
-            await axios.delete(`http://127.0.0.1:3000/modpacks/mods/${modId}`);
+            await axios.delete(`${API_BASE_URL}/modpacks/mods/${modId}`);
             fetchDetails();
         } catch (err) {
             console.error('Failed to remove mod:', err);
@@ -126,7 +129,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     const handleToggleMod = async (modId: string, currentStatus: boolean) => {
         try {
-            await axios.patch(`http://127.0.0.1:3000/modpacks/mods/${modId}`, {
+            await axios.patch(`${API_BASE_URL}/modpacks/mods/${modId}`, {
                 enabled: !currentStatus
             });
             // Optimistic update
@@ -173,13 +176,46 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     const handleLaunch = async () => {
         if (!currentVersion) return;
+
+        const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+        const rootBase = settings.mcPath;
+
+        // 1. Check Path
+        if (!rootBase || rootBase.trim() === '') {
+            setPathNotification(true);
+            return;
+        }
+
+        // 2. Check Auth
+        const storedAuth = localStorage.getItem('ms_auth');
+        const storedProfile = localStorage.getItem('ms_profile');
+        if (!settings.offlineMode && (!storedAuth || !storedProfile)) {
+            setAuthNotification(true);
+            return;
+        }
+
         setLaunchingInfo({ id: modpackId, launching: true });
         setLocalLaunching(true);
         setActiveTab('logs'); // Auto switch to logs
 
         try {
-            const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
-            const rootBase = settings.mcPath || 'C:\\Minecraft';
+            // Determine Auth Logic
+            let auth = { name: 'Player' };
+
+            // Only use real auth if Offline Mode is visibly DISABLED
+            if (!settings.offlineMode && storedAuth && storedProfile) {
+                try {
+                    const parsedAuth = JSON.parse(storedAuth);
+                    const parsedProfile = JSON.parse(storedProfile);
+                    auth = {
+                        ...parsedAuth,
+                        name: parsedProfile.name || 'Player',
+                        uuid: parsedProfile.uuid
+                    };
+                } catch (e) {
+                    console.error('Failed to parse stored auth:', e);
+                }
+            }
 
             const options = {
                 versionId: currentVersion.id,
@@ -189,7 +225,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 modpackName: modpack.name,
                 rootPath: rootBase,
                 memory: settings.maxMemory || '4G',
-                auth: { name: 'Player' }
+                auth: auth
             };
 
             const result = await (window as any).api.launchMinecraft(options);
@@ -460,7 +496,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                 fixedFilters={true}
                                 onAddMod={async (mod) => {
                                     try {
-                                        await axios.post(`http://127.0.0.1:3000/modpacks/versions/${currentVersion.id}/mods`, {
+                                        await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
                                             modrinthId: mod.project_id || mod.slug,
                                             name: mod.title,
                                             iconUrl: mod.icon_url,
@@ -485,6 +521,71 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                     )}
                 </div>
             </div>
+
+            {/* Notifications Overlay */}
+            {(pathNotification || authNotification) && (
+                <div className="absolute top-10 right-10 z-[200] flex flex-col gap-4 animate-in slide-in-from-right duration-300">
+                    {pathNotification && (
+                        <div className="bg-slate-900 border border-indigo-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
+                            <div className="flex items-start gap-4">
+                                <AlertCircle className="w-8 h-8 text-indigo-500 flex-shrink-0" />
+                                <div>
+                                    <h3 className="text-white font-black text-lg">Path Not Set</h3>
+                                    <p className="text-slate-400 font-medium text-sm">You need to set an installation path before playing.</p>
+                                </div>
+                                <button onClick={() => setPathNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => {
+                                        setPathNotification(false);
+                                        const event = new CustomEvent('navigate-settings');
+                                        window.dispatchEvent(event); // Dashboard needs to listen to this
+                                    }}
+                                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-sm"
+                                >
+                                    Configure
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const defaultPath = 'C:\\Users\\' + ((window as any).msProfile?.name || 'User') + '\\AppData\\Roaming\\.minecraft';
+                                        const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+                                        localStorage.setItem('mc_settings', JSON.stringify({ ...settings, mcPath: defaultPath }));
+                                        setPathNotification(false);
+                                    }}
+                                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-xl text-sm"
+                                >
+                                    Default
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {authNotification && (
+                        <div className="bg-slate-900 border border-red-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
+                            <div className="flex items-start gap-4">
+                                <AlertCircle className="w-8 h-8 text-red-500 flex-shrink-0" />
+                                <div>
+                                    <h3 className="text-white font-black text-lg">Login Required</h3>
+                                    <p className="text-slate-400 font-medium text-sm">Enable Offline Mode or sign in with Microsoft to play.</p>
+                                </div>
+                                <button onClick={() => setAuthNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setAuthNotification(false);
+                                    const event = new CustomEvent('navigate-settings');
+                                    window.dispatchEvent(event);
+                                }}
+                                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-xl text-sm"
+                            >
+                                Go to Settings
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {detailedModId && (
                 <ModDetailsModal
                     projectId={detailedModId}

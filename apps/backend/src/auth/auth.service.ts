@@ -125,7 +125,7 @@ export class AuthService {
         passwordHash: hashedPassword,
         verificationCode,
         verificationExpires: expires,
-        isVerified: false,
+        isVerified: true, // TEMPORARY: Auto-verify users since email service is having issues
       },
     });
 
@@ -140,8 +140,12 @@ export class AuthService {
   async verifyEmail(email: string, code: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    if (!user || user.verificationCode !== code) {
-      throw new BadRequestException('Invalid verification code');
+    // Trim code to handle accidental whitespace copy-paste
+    const cleanCode = code?.toString().trim();
+
+    if (!user || user.verificationCode !== cleanCode) {
+      console.log(`[AUTH] Verification failed for ${email}. Expected: ${user?.verificationCode}, Received: ${cleanCode}`);
+      throw new BadRequestException('Invalid verification code. Please check for typos.');
     }
 
     if (user.verificationExpires && user.verificationExpires < new Date()) {
@@ -174,9 +178,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    /* 
+    // TEMPORARY: Disabled email verification requirement
     if (!user.isVerified) {
       throw new UnauthorizedException('Email not verified. Please verify your email first.');
     }
+    */
 
     if (!bypassPassword) {
       const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
@@ -195,37 +202,45 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return { message: 'If an account exists with this email, a reset link has been sent.' };
+      // Security: Always return success message even if email not found
+      return { message: 'If an account exists with this email, a verification code has been sent.' };
     }
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
+    // Generate 6-digit code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date();
     expires.setHours(expires.getHours() + 1);
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        resetToken,
+        resetToken: resetCode, // Store code in resetToken field
         resetExpires: expires,
       },
     });
 
-    await this.mailService.sendPasswordResetEmail(user.email, user.username, resetToken);
+    await this.mailService.sendPasswordResetEmail(user.email, user.username, resetCode);
 
-    return { message: 'If an account exists with this email, a reset link has been sent.' };
+    return { message: 'If an account exists with this email, a verification code has been sent.' };
   }
 
-  async resetPassword(token: string, newPassword: string) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        resetToken: token,
-        resetExpires: { gt: new Date() },
-      },
-    });
+  async verifyResetCode(email: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const cleanCode = code?.toString().trim();
 
-    if (!user) {
-      throw new BadRequestException('Invalid or expired reset token');
+    if (!user || user.resetToken !== cleanCode || !user.resetExpires || user.resetExpires < new Date()) {
+      throw new BadRequestException('Invalid or expired verification code');
     }
+
+    return { valid: true };
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string) {
+    // 1. Verify code again (security best practice)
+    await this.verifyResetCode(email, code);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 

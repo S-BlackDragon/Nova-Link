@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { Users, Plus, Loader2, Shield, X } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface GroupCreatorProps {
     userId: string;
@@ -18,7 +19,7 @@ export default function GroupCreator({ userId, onCreated, onCancel }: GroupCreat
         setLoading(true);
         setError(null);
         try {
-            await axios.post('http://127.0.0.1:3000/groups', {
+            await axios.post(`${API_BASE_URL}/groups`, {
                 name,
                 ownerId: userId
             });

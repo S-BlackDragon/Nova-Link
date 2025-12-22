@@ -1,19 +1,22 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { Search, Loader2, Download, ExternalLink, Package, Filter, ChevronDown, Monitor, Palette, Box, Layers, Layout, DownloadCloud, Calendar } from 'lucide-react';
-import ModpackSelector from './ModpackSelector';
 import ModDetailsModal from './ModDetailsModal';
+import ModpackSelectorDialog from './ModpackSelectorDialog';
+import { API_BASE_URL } from '../../config/api';
+
 
 interface ModSearchProps {
-    userId?: string;
     // New props for embedding
     defaultGameVersion?: string;
     defaultLoader?: string;
     fixedFilters?: boolean;
     onAddMod?: (mod: any) => void;
+    onInstallModpack?: (mod: any) => void;
+    installingId?: string | null; // Track which modpack is currently installing
 }
 
-export default function ModSearch({ userId, defaultGameVersion, defaultLoader, fixedFilters, onAddMod }: ModSearchProps) {
+export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilters, onAddMod, onInstallModpack, installingId }: ModSearchProps) {
     const [query, setQuery] = useState('');
     const [mods, setMods] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -42,7 +45,7 @@ export default function ModSearch({ userId, defaultGameVersion, defaultLoader, f
         setError(null);
         try {
             console.log('Initiating search for:', { query, gameVersion, loader });
-            const response = await axios.get(`http://127.0.0.1:3000/modrinth/search`, {
+            const response = await axios.get(`${API_BASE_URL}/modrinth/search`, {
                 params: {
                     query,
                     gameVersion,
@@ -210,12 +213,28 @@ export default function ModSearch({ userId, defaultGameVersion, defaultLoader, f
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        onAddMod ? onAddMod(mod) : setSelectedMod(mod);
+                                        console.log('Mod selected:', mod);
+                                        const isModpack = mod.project_type?.toLowerCase() === 'modpack';
+                                        if (isModpack && onInstallModpack) {
+                                            onInstallModpack(mod);
+                                        } else {
+                                            onAddMod ? onAddMod(mod) : setSelectedMod(mod);
+                                        }
                                     }}
-                                    className="flex items-center gap-2 text-base font-black bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white px-6 py-3 rounded-xl transition-all duration-300 shadow-lg active:scale-[0.95] border border-emerald-500/20"
+                                    disabled={installingId === (mod.project_id || mod.slug)}
+                                    className={`flex items-center gap-2 text-base font-black px-6 py-3 rounded-xl transition-all duration-300 shadow-lg active:scale-[0.95] border disabled:opacity-70 disabled:cursor-wait ${mod.project_type?.toLowerCase() === 'modpack' ? 'bg-indigo-600/10 hover:bg-indigo-600 text-indigo-500 hover:text-white border-indigo-500/20' : 'bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white border-emerald-500/20'}`}
                                 >
-                                    <Download className="w-5 h-5" />
-                                    <span>Add to Pack</span>
+                                    {installingId === (mod.project_id || mod.slug) ? (
+                                        <>
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                            <span>Installing...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {mod.project_type?.toLowerCase() === 'modpack' ? <DownloadCloud className="w-5 h-5" /> : <Download className="w-5 h-5" />}
+                                            <span>{mod.project_type?.toLowerCase() === 'modpack' ? 'Install' : 'Add to Pack'}</span>
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -250,14 +269,16 @@ export default function ModSearch({ userId, defaultGameVersion, defaultLoader, f
                 />
             )}
 
-            {selectedMod && userId && (
-                <ModpackSelector
-                    userId={userId}
+            {selectedMod && !onAddMod && (
+                <ModpackSelectorDialog
                     mod={selectedMod}
                     gameVersion={gameVersion}
                     loader={loader}
                     onClose={() => setSelectedMod(null)}
-                    onSuccess={() => setSelectedMod(null)}
+                    onSuccess={() => {
+                        setSelectedMod(null);
+                        // Optionally refresh the search results
+                    }}
                 />
             )}
         </div>
