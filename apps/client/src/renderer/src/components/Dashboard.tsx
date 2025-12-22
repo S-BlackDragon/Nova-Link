@@ -327,7 +327,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           </div>
 
           <div className="mt-3 text-center space-y-2">
-            <span className="block text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.20</span>
+            <span className="block text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.21</span>
             <button
               onClick={handleCheckUpdate}
               disabled={checkingUpdate}
