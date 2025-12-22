@@ -32,6 +32,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [installingModpack, setInstallingModpack] = useState<string | null>(null);
+  const [deletingModpack, setDeletingModpack] = useState<string | null>(null);
   const [msProfile, setMsProfile] = useState<{ name: string } | null>(null);
   const { setLaunchingInfo, launching: globalLaunching, isRunning, activePackId } = useLogs();
 
@@ -189,6 +190,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     e.stopPropagation();
     if (!window.confirm('Are you sure you want to delete this modpack? This will verify delete all local files for this instance.')) return;
 
+    setDeletingModpack(id);
     try {
       // Find the modpack to get its name
       const pack = modpacks.find((p: any) => p.id === id);
@@ -211,6 +213,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     } catch (err) {
       console.error('Failed to delete modpack:', err);
       alert('Failed to delete modpack');
+    } finally {
+      setDeletingModpack(null);
     }
   };
 
@@ -291,7 +295,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           </div>
 
           <div className="mt-3 text-center">
-            <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.19</span>
+            <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.20</span>
           </div>
         </div>
       </aside>
@@ -341,9 +345,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                         >
                           <button
                             onClick={(e) => handleDeleteModpack(e, pack.id)}
-                            className="absolute top-6 right-6 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg"
+                            disabled={deletingModpack === pack.id}
+                            className="absolute top-6 right-6 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg disabled:opacity-70"
                           >
-                            <Trash2 className="w-5 h-5" />
+                            {deletingModpack === pack.id ? (
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-5 h-5" />
+                            )}
                           </button>
 
                           <div className="flex items-start justify-between mb-10">
@@ -435,6 +444,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           {activeTab === 'search' && (
             <div>
               <ModSearch
+                key={`search-${activeTab}-${modpacks.length}`}
                 onAddMod={(mod) => {
                   setSelectedMod(mod);
                 }}

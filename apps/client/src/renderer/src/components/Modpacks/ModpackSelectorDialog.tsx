@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Plus, X, Loader2, FolderPlus } from 'lucide-react';
+import { Package, Plus, X, Loader2, FolderPlus, ChevronDown } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
 
 interface ModpackSelectorDialogProps {
@@ -11,16 +11,30 @@ interface ModpackSelectorDialogProps {
     onSuccess: () => void;
 }
 
-export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClose, onSuccess }: ModpackSelectorDialogProps) {
+export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVersion, loader: initialLoader, onClose, onSuccess }: ModpackSelectorDialogProps) {
     const [modpacks, setModpacks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [newModpackName, setNewModpackName] = useState('');
     const [showCreateForm, setShowCreateForm] = useState(false);
 
+    // Version selection state
+    const [gameVersion, setGameVersion] = useState(initialGameVersion);
+    const [loader, setLoader] = useState(initialLoader);
+    const [modVersions, setModVersions] = useState<any[]>([]);
+    const [selectedModVersion, setSelectedModVersion] = useState<string | null>(null);
+    const [loadingVersions, setLoadingVersions] = useState(false);
+
+    const availableGameVersions = ['1.21.1', '1.21', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.19.2', '1.18.2', '1.17.1', '1.16.5'];
+    const availableLoaders = ['Fabric', 'Forge', 'Quilt', 'NeoForge'];
+
     useEffect(() => {
         fetchModpacks();
-    }, []);
+    }, [gameVersion, loader]);
+
+    useEffect(() => {
+        fetchModVersions();
+    }, [gameVersion, loader, mod.project_id]);
 
     const fetchModpacks = async () => {
         setLoading(true);
@@ -46,6 +60,32 @@ export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClos
         }
     };
 
+    const fetchModVersions = async () => {
+        setLoadingVersions(true);
+        try {
+            const response = await axios.get(
+                `https://api.modrinth.com/v2/project/${mod.project_id || mod.slug}/version`,
+                {
+                    params: {
+                        game_versions: JSON.stringify([gameVersion]),
+                        loaders: JSON.stringify([loader.toLowerCase()])
+                    },
+                    headers: { 'User-Agent': 'NovaLink/1.0.19' }
+                }
+            );
+
+            setModVersions(response.data || []);
+            if (response.data && response.data.length > 0) {
+                setSelectedModVersion(response.data[0].id);
+            }
+        } catch (err) {
+            console.error('Failed to fetch mod versions:', err);
+            setModVersions([]);
+        } finally {
+            setLoadingVersions(false);
+        }
+    };
+
     const handleAddToModpack = async (modpackId: string) => {
         try {
             const modpack = modpacks.find(p => p.id === modpackId);
@@ -56,7 +96,7 @@ export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClos
                 modrinthId: mod.project_id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
-                versionId: mod.versionId || null,
+                versionId: selectedModVersion || null,
                 projectType: mod.project_type || 'mod'
             });
 
@@ -95,7 +135,7 @@ export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClos
                 modrinthId: mod.project_id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
-                versionId: mod.versionId || null,
+                versionId: selectedModVersion || null,
                 projectType: mod.project_type || 'mod'
             });
 
@@ -139,6 +179,8 @@ export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClos
                             </button>
                             <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 space-y-4">
                                 <h3 className="text-xl font-black text-white">Create New Modpack</h3>
+
+                                {/* Modpack Name */}
                                 <input
                                     type="text"
                                     value={newModpackName}
@@ -152,10 +194,75 @@ export default function ModpackSelectorDialog({ mod, gameVersion, loader, onClos
                                         }
                                     }}
                                 />
+
+                                {/* Game Version Selector */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-400 uppercase tracking-wider">Game Version</label>
+                                    <div className="relative">
+                                        <select
+                                            value={gameVersion}
+                                            onChange={(e) => setGameVersion(e.target.value)}
+                                            className="w-full appearance-none bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 pr-10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        >
+                                            {availableGameVersions.map(v => (
+                                                <option key={v} value={v}>{v}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 pointer-events-none" />
+                                    </div>
+                                </div>
+
+                                {/* Loader Selector */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-400 uppercase tracking-wider">Loader</label>
+                                    <div className="relative">
+                                        <select
+                                            value={loader}
+                                            onChange={(e) => setLoader(e.target.value)}
+                                            className="w-full appearance-none bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 pr-10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        >
+                                            {availableLoaders.map(l => (
+                                                <option key={l} value={l}>{l}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 pointer-events-none" />
+                                    </div>
+                                </div>
+
+                                {/* Mod Version Selector */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-400 uppercase tracking-wider">Mod Version</label>
+                                    {loadingVersions ? (
+                                        <div className="flex items-center justify-center py-3 bg-slate-800/50 rounded-xl">
+                                            <Loader2 className="w-4 h-4 animate-spin text-emerald-500 mr-2" />
+                                            <span className="text-sm text-slate-400">Loading versions...</span>
+                                        </div>
+                                    ) : modVersions.length > 0 ? (
+                                        <div className="relative">
+                                            <select
+                                                value={selectedModVersion || ''}
+                                                onChange={(e) => setSelectedModVersion(e.target.value)}
+                                                className="w-full appearance-none bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 pr-10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            >
+                                                {modVersions.map(v => (
+                                                    <option key={v.id} value={v.id}>
+                                                        {v.name || v.version_number} ({v.game_versions?.join(', ')})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 pointer-events-none" />
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm text-red-400 bg-red-500/10 p-3 rounded-xl">
+                                            No compatible versions found for {gameVersion} + {loader}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="flex gap-3">
                                     <button
                                         onClick={handleCreateModpack}
-                                        disabled={!newModpackName.trim() || creating}
+                                        disabled={!newModpackName.trim() || creating || modVersions.length === 0}
                                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
                                     >
                                         {creating ? (

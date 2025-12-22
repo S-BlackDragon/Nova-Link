@@ -492,9 +492,10 @@ app.whenReady().then(() => {
         version: { number: options.gameVersion, type: 'release' },
         memory: { max: options.memory || '4G', min: '2G' },
         overrides: {
-          // CRITICAL: Do NOT use detached: true as it breaks log capturing
-          // windowsHide: true properly hides the console while still allowing stdout/stderr capture
+          // CRITICAL: Explicit stdio configuration to ensure we capture output
+          detached: false,
           windowsHide: true,
+          shell: false
         },
         window: {
           width: 1280,
@@ -504,9 +505,22 @@ app.whenReady().then(() => {
 
       // Platform-specific adjustments for Windows
       if (process.platform === 'win32') {
-        // Ensure we're using javaw.exe (console-less) on Windows
-        // MCLC handles this automatically, but we ensure windowsHide is set
-        opts.overrides.windowsHide = true;
+        // Force javaw.exe (windowless) instead of java.exe
+        // This prevents CMD window while still allowing log capture through pipes
+        const javaPath = opts.javaPath || process.env.JAVA_HOME;
+        if (javaPath && javaPath.includes('java.exe')) {
+          opts.javaPath = javaPath.replace('java.exe', 'javaw.exe');
+          _event.sender.send('launcher-log', `[INFO] Using javaw.exe for windowless execution`);
+        }
+
+        // Ensure proper spawn options for Windows
+        opts.overrides = {
+          ...opts.overrides,
+          windowsHide: true,
+          windowsVerbatimArguments: false,
+          detached: false,
+          shell: false
+        };
       }
 
       if (options.loaderType === 'fabric' && options.fabricVersionId) opts.version.custom = options.fabricVersionId;
@@ -533,16 +547,26 @@ app.whenReady().then(() => {
       _event.sender.send('launcher-log', '[INFO] Launching Minecraft...');
       const child = await launcher.launch(opts);
 
+      // Diagnostic: Log child process info
+      _event.sender.send('launcher-log', `[INFO] Java process spawned - PID: ${child.pid}`);
+      _event.sender.send('launcher-log', `[INFO] stdout available: ${!!child.stdout}`);
+      _event.sender.send('launcher-log', `[INFO] stderr available: ${!!child.stderr}`);
+
       // CRITICAL: Explicitly capture stdout/stderr for Java logs
       // This is the main way we get Minecraft's runtime logs
       if (child.stdout) {
         child.stdout.setEncoding('utf8');
         child.stdout.on('data', (data: any) => {
-          const logLines = data.toString().split('\n').filter((line: string) => line.trim());
+          const output = data.toString();
+          const logLines = output.split('\n').filter((line: string) => line.trim());
           logLines.forEach((line: string) => {
             _event.sender.send('launcher-log', `[JAVA] ${line}`);
           });
         });
+        child.stdout.on('error', (err) => {
+          _event.sender.send('launcher-log', `[ERROR] stdout error: ${err.message}`);
+        });
+        _event.sender.send('launcher-log', '[INFO] stdout stream listeners attached');
       } else {
         _event.sender.send('launcher-log', '[WARN] stdout not available for Java process');
       }
@@ -550,14 +574,28 @@ app.whenReady().then(() => {
       if (child.stderr) {
         child.stderr.setEncoding('utf8');
         child.stderr.on('data', (data: any) => {
-          const logLines = data.toString().split('\n').filter((line: string) => line.trim());
+          const output = data.toString();
+          const logLines = output.split('\n').filter((line: string) => line.trim());
           logLines.forEach((line: string) => {
             _event.sender.send('launcher-log', `[JAVA-ERR] ${line}`);
           });
         });
+        child.stderr.on('error', (err) => {
+          _event.sender.send('launcher-log', `[ERROR] stderr error: ${err.message}`);
+        });
+        _event.sender.send('launcher-log', '[INFO] stderr stream listeners attached');
       } else {
         _event.sender.send('launcher-log', '[WARN] stderr not available for Java process');
       }
+
+      // Additional logging for process events
+      child.on('error', (err) => {
+        _event.sender.send('launcher-log', `[ERROR] Child process error: ${err.message}`);
+      });
+
+      child.on('exit', (code, signal) => {
+        _event.sender.send('launcher-log', `[INFO] Process exited - code: ${code}, signal: ${signal}`);
+      });
 
       runningInstances.set(safeName, child);
       return { success: true };

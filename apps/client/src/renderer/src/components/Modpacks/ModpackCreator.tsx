@@ -68,7 +68,7 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md">
             <div className="bg-slate-900 border border-white/10 rounded-[3rem] shadow-2xl overflow-hidden max-w-3xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-12 bg-white/[0.02]">
                     <div className="flex items-center gap-6 mb-12">
@@ -94,6 +94,7 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
                                     placeholder="My Awesome Pack"
                                     className="w-full bg-slate-800/50 border border-white/5 rounded-[1.5rem] py-6 px-8 text-white text-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-slate-800/80 transition-all duration-300 placeholder:text-slate-600 font-medium"
                                     required
+                                    autoFocus
                                 />
                             </div>
 
