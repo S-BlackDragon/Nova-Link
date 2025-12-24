@@ -1,8 +1,8 @@
 
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
-# Install OpenSSL for Prisma to detect correct version
-RUN apk add --no-cache openssl
+# Install OpenSSL for Prisma
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -24,12 +24,12 @@ RUN npx prisma generate
 RUN npm run build
 
 # --- Production Stage ---
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Install system dependencies for Prisma
-RUN apk add --no-cache openssl libc6-compat
+# Install OpenSSL for Prisma
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
