@@ -1,6 +1,9 @@
 
 FROM node:20-alpine AS builder
 
+# Install OpenSSL for Prisma to detect correct version
+RUN apk add --no-cache openssl
+
 # Set working directory
 WORKDIR /app
 
