@@ -37,7 +37,12 @@ export class ModpacksService {
 
   findAll() {
     return this.prisma.modpack.findMany({
-      include: { author: true },
+      include: {
+        author: true,
+        versions: {
+          orderBy: { createdAt: 'desc' }
+        }
+      },
     });
   }
 
@@ -47,11 +52,40 @@ export class ModpacksService {
       include: {
         versions: {
           orderBy: { createdAt: 'desc' },
-          take: 1,
           include: { mods: true }
         }
       },
     });
+  }
+
+  async findSharedByUser(userId: string) {
+    const groupMemberships = await this.prisma.groupMember.findMany({
+      where: { userId },
+      include: {
+        group: {
+          include: {
+            targetModpack: {
+              include: {
+                versions: {
+                  orderBy: { createdAt: 'desc' },
+                  include: { mods: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const targetedByGroups = groupMemberships
+      .map(m => m.group.targetModpack)
+      .filter((mp): mp is any => mp !== null && mp.authorId !== userId);
+
+    // Dedup by ID
+    const modpackMap = new Map();
+    targetedByGroups.forEach(mp => modpackMap.set(mp.id, mp));
+
+    return Array.from(modpackMap.values());
   }
 
   findOne(id: string) {
@@ -72,30 +106,6 @@ export class ModpacksService {
     });
   }
 
-  async getManifest(versionId: string) {
-    const version = await this.prisma.modpackVersion.findUnique({
-      where: { id: versionId },
-      include: {
-        modpack: true,
-        mods: {
-          where: { enabled: true }
-        }
-      },
-    });
-
-    if (!version) {
-      throw new Error('Version not found');
-    }
-
-    return {
-      modpackName: version.modpack.name,
-      versionNumber: version.versionNumber,
-      gameVersion: version.gameVersion,
-      loaderType: version.loaderType,
-      loaderVersion: version.loaderVersion,
-      mods: version.mods,
-    };
-  }
 
   async addMod(versionId: string, modData: any) {
     // 1. Get version details to determine compatibility
@@ -174,7 +184,16 @@ export class ModpacksService {
 
         console.log(`[AddMod] Selected version ${targetVersion.id} for ${currentId}, deps: ${targetVersion.dependencies?.length || 0}`);
 
-        // Update the mod data with the correct version ID
+        // Extract file metadata from targetVersion
+        const primaryFile = targetVersion.files.find((f: any) => f.primary) || targetVersion.files[0];
+        const fileMetadata = primaryFile ? {
+          url: primaryFile.url,
+          filename: primaryFile.filename,
+          sha1: primaryFile.hashes?.sha1,
+          size: primaryFile.size
+        } : {};
+
+        // Update the mod data with the correct version ID and metadata
         if (!queuedData) {
           // Need to fetch metadata if it's a dependency we discovered
           const project = await this.modrinthService.getProject(currentId);
@@ -183,11 +202,13 @@ export class ModpacksService {
             name: project.title,
             iconUrl: project.icon_url,
             versionId: targetVersion.id,
-            projectType: project.project_type
+            projectType: project.project_type,
+            ...fileMetadata
           });
         } else {
           // Ensure versionId is set correctly on the object
           queuedData.versionId = targetVersion.id;
+          Object.assign(queuedData, fileMetadata); // Merge file metadata
           modsToAdd.set(currentId, queuedData);
         }
 
@@ -221,7 +242,12 @@ export class ModpacksService {
           versionId: mod.versionId,
           iconUrl: mod.iconUrl,
           projectType: mod.projectType,
-        },
+          filename: mod.filename,
+          // ...
+          url: mod.url,
+          sha1: mod.sha1,
+          size: mod.size,
+        } as any,
       });
       createdMods.push(created);
       installedModIds.add(mod.modrinthId); // Prevent partial duplicates if loop re-runs

@@ -16,12 +16,14 @@ const groups_module_1 = require("./groups/groups.module");
 const modpacks_module_1 = require("./modpacks/modpacks.module");
 const modrinth_module_1 = require("./modrinth/modrinth.module");
 const mail_module_1 = require("./mail/mail.module");
+const storage_module_1 = require("./storage/storage.module");
+const sync_module_1 = require("./sync/sync.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, auth_module_1.AuthModule, groups_module_1.GroupsModule, modpacks_module_1.ModpacksModule, modrinth_module_1.ModrinthModule, mail_module_1.MailModule],
+        imports: [prisma_module_1.PrismaModule, auth_module_1.AuthModule, groups_module_1.GroupsModule, modpacks_module_1.ModpacksModule, modrinth_module_1.ModrinthModule, mail_module_1.MailModule, storage_module_1.StorageModule, sync_module_1.SyncModule],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService],
     })

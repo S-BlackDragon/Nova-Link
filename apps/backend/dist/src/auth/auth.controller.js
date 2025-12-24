@@ -20,11 +20,18 @@ const login_dto_1 = require("./dto/login.dto");
 const verify_email_dto_1 = require("./dto/verify-email.dto");
 const forgot_password_dto_1 = require("./dto/forgot-password.dto");
 const reset_password_dto_1 = require("./dto/reset-password.dto");
+const update_profile_dto_1 = require("./dto/update-profile.dto");
+const request_email_change_dto_1 = require("./dto/request-email-change.dto");
+const confirm_email_change_dto_1 = require("./dto/confirm-email-change.dto");
+const update_password_dto_1 = require("./dto/update-password.dto");
 const jwt_auth_guard_1 = require("./jwt-auth.guard");
+const storage_service_1 = require("../storage/storage.service");
 let AuthController = class AuthController {
     authService;
-    constructor(authService) {
+    storageService;
+    constructor(authService, storageService) {
         this.authService = authService;
+        this.storageService = storageService;
     }
     validateEmail(email) {
         return this.authService.validateEmail(email);
@@ -41,11 +48,38 @@ let AuthController = class AuthController {
     forgotPassword(forgotPasswordDto) {
         return this.authService.forgotPassword(forgotPasswordDto.email);
     }
+    verifyResetCode(verifyDto) {
+        return this.authService.verifyResetCode(verifyDto.email, verifyDto.code);
+    }
     resetPassword(resetDto) {
-        return this.authService.resetPassword(resetDto.token, resetDto.newPassword);
+        return this.authService.resetPassword(resetDto.email, resetDto.code, resetDto.newPassword);
     }
     getProfile(req) {
         return req.user;
+    }
+    updateProfile(req, updateProfileDto) {
+        return this.authService.updateProfile(req.user.id, updateProfileDto);
+    }
+    requestEmailChange(req, dto) {
+        return this.authService.requestEmailChange(req.user.id, dto);
+    }
+    confirmEmailChange(req, dto) {
+        return this.authService.confirmEmailChange(req.user.id, dto);
+    }
+    updatePassword(req, dto) {
+        return this.authService.updatePassword(req.user.id, dto);
+    }
+    async getAvatarUploadUrl(req, contentType) {
+        if (!contentType || !contentType.startsWith('image/')) {
+            throw new common_1.BadRequestException('Valid image content type is required');
+        }
+        return this.storageService.getPresignedUploadUrl(req.user.id, contentType);
+    }
+    async confirmAvatarUpload(req, body) {
+        if (!body.publicUrl) {
+            throw new common_1.BadRequestException('publicUrl is required');
+        }
+        return this.authService.updateAvatar(req.user.id, body.publicUrl);
     }
 };
 exports.AuthController = AuthController;
@@ -85,6 +119,13 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "forgotPassword", null);
 __decorate([
+    (0, common_1.Post)('verify-reset-code'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "verifyResetCode", null);
+__decorate([
     (0, common_1.Post)('reset-password'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -99,8 +140,63 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "getProfile", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Patch)('profile'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_profile_dto_1.UpdateProfileDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('request-email-change'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, request_email_change_dto_1.RequestEmailChangeDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "requestEmailChange", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Patch)('confirm-email-change'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, confirm_email_change_dto_1.ConfirmEmailChangeDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "confirmEmailChange", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Patch)('update-password'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_password_dto_1.UpdatePasswordDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "updatePassword", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Get)('avatar-upload-url'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Query)('contentType')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "getAvatarUploadUrl", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Patch)('avatar-confirm'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "confirmAvatarUpload", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
-    __metadata("design:paramtypes", [auth_service_1.AuthService])
+    __metadata("design:paramtypes", [auth_service_1.AuthService,
+        storage_service_1.StorageService])
 ], AuthController);
 //# sourceMappingURL=auth.controller.js.map

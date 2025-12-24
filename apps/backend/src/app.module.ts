@@ -7,9 +7,11 @@ import { GroupsModule } from './groups/groups.module';
 import { ModpacksModule } from './modpacks/modpacks.module';
 import { ModrinthModule } from './modrinth/modrinth.module';
 import { MailModule } from './mail/mail.module';
+import { StorageModule } from './storage/storage.module';
+import { SyncModule } from './sync/sync.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, GroupsModule, ModpacksModule, ModrinthModule, MailModule],
+  imports: [PrismaModule, AuthModule, GroupsModule, ModpacksModule, ModrinthModule, MailModule, StorageModule, SyncModule],
   controllers: [AppController],
   providers: [AppService],
 })

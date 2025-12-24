@@ -9,12 +9,12 @@ export declare class ModpacksService {
     constructor(prisma: PrismaService, modrinthService: ModrinthService);
     create(createModpackDto: CreateModpackDto): import(".prisma/client").Prisma.Prisma__ModpackClient<{
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     }, never, import("@prisma/client/runtime/library").DefaultArgs>;
     publishVersion(id: string, publishVersionDto: PublishVersionDto): Promise<{
         id: string;
@@ -24,6 +24,8 @@ export declare class ModpacksService {
         loaderType: string | null;
         loaderVersion: string | null;
         manifestUrl: string | null;
+        manifestJson: import("@prisma/client/runtime/library").JsonValue | null;
+        overridesKey: string | null;
         isPublished: boolean;
         modpackId: string;
         parentVersionId: string | null;
@@ -31,6 +33,8 @@ export declare class ModpacksService {
     findAll(): import(".prisma/client").Prisma.PrismaPromise<({
         author: {
             id: string;
+            createdAt: Date;
+            updatedAt: Date;
             username: string;
             email: string;
             passwordHash: string;
@@ -40,29 +44,52 @@ export declare class ModpacksService {
             resetToken: string | null;
             resetExpires: Date | null;
             curseforgeToken: string | null;
-            createdAt: Date;
-            updatedAt: Date;
+            avatarUrl: string | null;
         };
+        versions: {
+            id: string;
+            createdAt: Date;
+            versionNumber: string;
+            gameVersion: string | null;
+            loaderType: string | null;
+            loaderVersion: string | null;
+            manifestUrl: string | null;
+            manifestJson: import("@prisma/client/runtime/library").JsonValue | null;
+            overridesKey: string | null;
+            isPublished: boolean;
+            modpackId: string;
+            parentVersionId: string | null;
+        }[];
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     })[]>;
     findByUser(userId: string): import(".prisma/client").Prisma.PrismaPromise<({
         versions: ({
             mods: {
                 id: string;
                 name: string;
-                enabled: boolean;
-                modpackVersionId: string;
-                modrinthId: string;
-                versionId: string | null;
+                createdAt: Date;
+                updatedAt: Date;
+                author: string | null;
                 iconUrl: string | null;
+                summary: string | null;
+                modrinthId: string | null;
+                curseforgeId: string | null;
+                versionId: string | null;
+                filename: string | null;
+                url: string | null;
+                sha1: string | null;
+                size: number | null;
+                enabled: boolean;
+                side: string;
                 projectType: string;
+                modpackVersionId: string;
             }[];
         } & {
             id: string;
@@ -72,30 +99,43 @@ export declare class ModpacksService {
             loaderType: string | null;
             loaderVersion: string | null;
             manifestUrl: string | null;
+            manifestJson: import("@prisma/client/runtime/library").JsonValue | null;
+            overridesKey: string | null;
             isPublished: boolean;
             modpackId: string;
             parentVersionId: string | null;
         })[];
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     })[]>;
+    findSharedByUser(userId: string): Promise<any[]>;
     findOne(id: string): import(".prisma/client").Prisma.Prisma__ModpackClient<({
         versions: ({
             mods: {
                 id: string;
                 name: string;
-                enabled: boolean;
-                modpackVersionId: string;
-                modrinthId: string;
-                versionId: string | null;
+                createdAt: Date;
+                updatedAt: Date;
+                author: string | null;
                 iconUrl: string | null;
+                summary: string | null;
+                modrinthId: string | null;
+                curseforgeId: string | null;
+                versionId: string | null;
+                filename: string | null;
+                url: string | null;
+                sha1: string | null;
+                size: number | null;
+                enabled: boolean;
+                side: string;
                 projectType: string;
+                modpackVersionId: string;
             }[];
         } & {
             id: string;
@@ -105,82 +145,97 @@ export declare class ModpacksService {
             loaderType: string | null;
             loaderVersion: string | null;
             manifestUrl: string | null;
+            manifestJson: import("@prisma/client/runtime/library").JsonValue | null;
+            overridesKey: string | null;
             isPublished: boolean;
             modpackId: string;
             parentVersionId: string | null;
         })[];
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     }) | null, null, import("@prisma/client/runtime/library").DefaultArgs>;
     update(id: string, updateModpackDto: UpdateModpackDto): import(".prisma/client").Prisma.Prisma__ModpackClient<{
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     }, never, import("@prisma/client/runtime/library").DefaultArgs>;
-    getManifest(versionId: string): Promise<{
-        modpackName: string;
-        versionNumber: string;
-        gameVersion: string | null;
-        loaderType: string | null;
-        loaderVersion: string | null;
-        mods: {
-            id: string;
-            name: string;
-            enabled: boolean;
-            modpackVersionId: string;
-            modrinthId: string;
-            versionId: string | null;
-            iconUrl: string | null;
-            projectType: string;
-        }[];
-    }>;
     addMod(versionId: string, modData: any): Promise<{
         id: string;
         name: string;
-        enabled: boolean;
-        modpackVersionId: string;
-        modrinthId: string;
-        versionId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        author: string | null;
         iconUrl: string | null;
+        summary: string | null;
+        modrinthId: string | null;
+        curseforgeId: string | null;
+        versionId: string | null;
+        filename: string | null;
+        url: string | null;
+        sha1: string | null;
+        size: number | null;
+        enabled: boolean;
+        side: string;
         projectType: string;
+        modpackVersionId: string;
     }[]>;
     removeMod(modId: string): Promise<{
         id: string;
         name: string;
-        enabled: boolean;
-        modpackVersionId: string;
-        modrinthId: string;
-        versionId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        author: string | null;
         iconUrl: string | null;
+        summary: string | null;
+        modrinthId: string | null;
+        curseforgeId: string | null;
+        versionId: string | null;
+        filename: string | null;
+        url: string | null;
+        sha1: string | null;
+        size: number | null;
+        enabled: boolean;
+        side: string;
         projectType: string;
+        modpackVersionId: string;
     }>;
     toggleMod(modId: string, enabled: boolean): Promise<{
         id: string;
         name: string;
-        enabled: boolean;
-        modpackVersionId: string;
-        modrinthId: string;
-        versionId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        author: string | null;
         iconUrl: string | null;
+        summary: string | null;
+        modrinthId: string | null;
+        curseforgeId: string | null;
+        versionId: string | null;
+        filename: string | null;
+        url: string | null;
+        sha1: string | null;
+        size: number | null;
+        enabled: boolean;
+        side: string;
         projectType: string;
+        modpackVersionId: string;
     }>;
     remove(id: string): Promise<{
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         name: string;
         description: string | null;
-        authorId: string;
         isPublic: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
     }>;
 }

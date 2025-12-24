@@ -30,6 +30,7 @@ services:
       # Database connection string (internal docker network)
       DATABASE_URL: postgresql://${DB_USER:-admin}:${DB_PASSWORD:-password}@postgres:5432/${DB_NAME:-launcher_db}?schema=public
       JWT_SECRET: ${JWT_SECRET:-supersecretkey}
+      API_BASE_URL: http://163.192.96.105:3000
       # Add other env vars here (SMTP, etc.)
     depends_on:
       - postgres

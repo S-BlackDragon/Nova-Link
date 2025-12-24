@@ -18,6 +18,17 @@ const api = {
   isInstanceRunning: (modpackName: string) => electronAPI.ipcRenderer.invoke('is-instance-running', modpackName),
   openFolder: (path: string) => electronAPI.ipcRenderer.invoke('open-folder', path),
   listMods: (options: { rootPath: string, modpackName: string, type?: string }) => electronAPI.ipcRenderer.invoke('list-mods', options),
+  toggleModFile: (options: { rootPath: string, modpackName: string, filename: string, enabled: boolean }) => electronAPI.ipcRenderer.invoke('toggle-mod-file', options),
+
+  // Sync API
+  sync: {
+    start: (instanceId: string, manifest: any) => electronAPI.ipcRenderer.invoke('sync:start', instanceId, manifest),
+    onProgress: (callback: (progress: any) => void) => {
+      const handler = (_event: any, progress: any) => callback(progress);
+      electronAPI.ipcRenderer.on('sync:progress', handler);
+      return () => electronAPI.ipcRenderer.removeListener('sync:progress', handler);
+    }
+  },
 
   // Microsoft Authentication
   microsoftLogin: () => electronAPI.ipcRenderer.invoke('microsoft-login'),

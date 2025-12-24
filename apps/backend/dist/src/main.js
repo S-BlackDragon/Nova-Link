@@ -37,6 +37,8 @@ const dotenv = __importStar(require("dotenv"));
 dotenv.config();
 const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
+const path_1 = require("path");
+const express = __importStar(require("express"));
 const app_module_1 = require("./app.module");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
@@ -44,6 +46,7 @@ async function bootstrap() {
         console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
         next();
     });
+    app.use('/uploads', express.static((0, path_1.join)(__dirname, '..', 'uploads')));
     app.enableCors({
         origin: true,
         methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',

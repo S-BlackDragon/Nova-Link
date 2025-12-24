@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2 } from 'lucide-react';
+import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 interface MicrosoftProfile {
     name: string;
@@ -11,7 +12,9 @@ export default function Settings() {
     const [maxMemory, setMaxMemory] = useState('4G');
     const [minMemory, setMinMemory] = useState('2G');
     const [offlineMode, setOfflineMode] = useState(false);
+    const [notificationSounds, setNotificationSounds] = useState(true);
     const [saved, setSaved] = useState(false);
+    const toast = useToast();
 
     // Microsoft account state
     const [msAccount, setMsAccount] = useState<MicrosoftProfile | null>(null);
@@ -19,8 +22,9 @@ export default function Settings() {
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
-        localStorage.setItem('mc_settings', JSON.stringify({ mcPath, maxMemory, minMemory, offlineMode }));
+        localStorage.setItem('mc_settings', JSON.stringify({ mcPath, maxMemory, minMemory, offlineMode, notificationSounds }));
         setSaved(true);
+        toast.success('Settings Saved', 'Your preferences have been updated.');
         setTimeout(() => setSaved(false), 2000);
     };
 
@@ -33,12 +37,13 @@ export default function Settings() {
                 // Store auth for later use when launching
                 localStorage.setItem('ms_auth', JSON.stringify(result.auth));
                 localStorage.setItem('ms_profile', JSON.stringify(result.profile));
+                toast.success('Logged In', `Connected as ${result.profile.name}`);
             } else {
-                alert('Microsoft login failed: ' + result.error);
+                toast.error('Login Failed', result.error);
             }
         } catch (err: any) {
             console.error('Microsoft login error:', err);
-            alert('Failed to login with Microsoft');
+            toast.error('Login Failed', 'Failed to login with Microsoft. Please try again.');
         } finally {
             setMsLoading(false);
         }
@@ -59,6 +64,7 @@ export default function Settings() {
                 if (parsed.maxMemory) setMaxMemory(parsed.maxMemory);
                 if (parsed.minMemory) setMinMemory(parsed.minMemory);
                 if (parsed.offlineMode !== undefined) setOfflineMode(parsed.offlineMode);
+                if (parsed.notificationSounds !== undefined) setNotificationSounds(parsed.notificationSounds);
             }
 
             // Load Microsoft profile if exists
@@ -171,6 +177,32 @@ export default function Settings() {
                             </p>
                         </div>
                     )}
+                </div>
+
+                {/* Notification Sounds Toggle */}
+                <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-10 rounded-[3rem] shadow-2xl group hover:border-violet-500/20 transition-all duration-500">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                            <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-inner ${notificationSounds ? 'bg-violet-600/20' : 'bg-slate-700/30'}`}>
+                                {notificationSounds ? <Volume2 className="w-8 h-8 text-violet-500" /> : <VolumeX className="w-8 h-8 text-slate-500" />}
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-black text-white tracking-tight">Notification Sounds</h2>
+                                <p className="text-slate-400 text-lg font-medium max-w-lg">
+                                    Play sounds when important notifications appear.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Toggle Switch */}
+                        <button
+                            type="button"
+                            onClick={() => setNotificationSounds(!notificationSounds)}
+                            className={`relative w-20 h-10 rounded-full transition-all duration-300 ${notificationSounds ? 'bg-violet-500' : 'bg-slate-700'}`}
+                        >
+                            <div className={`absolute top-1 w-8 h-8 bg-white rounded-full shadow-lg transition-all duration-300 ${notificationSounds ? 'left-11' : 'left-1'}`} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Minecraft Path */}

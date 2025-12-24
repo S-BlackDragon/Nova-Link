@@ -14,25 +14,28 @@ const common_1 = require("@nestjs/common");
 const axios_1 = __importDefault(require("axios"));
 let ModrinthService = class ModrinthService {
     baseUrl = 'https://api.modrinth.com/v2';
-    async searchMods(query, gameVersion, loader, projectType = 'mod') {
+    async searchMods(query, gameVersion, loader, projectType = 'mod', offset = 0, limit = 100) {
         try {
             const facets = [
                 [`project_type:${projectType}`]
             ];
-            if (gameVersion)
+            if (gameVersion && gameVersion !== 'Any') {
                 facets.push([`versions:${gameVersion}`]);
-            if (loader && projectType === 'mod')
+            }
+            if (loader && loader !== 'Any' && projectType === 'mod') {
                 facets.push([`categories:${loader.toLowerCase()}`]);
-            console.log('Searching Modrinth:', { query, facets: JSON.stringify(facets) });
+            }
+            console.log('Searching Modrinth:', { query, facets: JSON.stringify(facets), offset, limit });
             const response = await axios_1.default.get(`${this.baseUrl}/search`, {
                 params: {
-                    query,
+                    query: query || '',
                     facets: JSON.stringify(facets),
-                    limit: 20,
-                    index: 'relevance'
+                    limit: limit,
+                    offset: offset,
+                    index: query ? 'relevance' : 'downloads'
                 },
                 headers: {
-                    'User-Agent': 'AntigravityLauncher/1.0.0 (alex@example.com)'
+                    'User-Agent': 'NovaLink/1.0.0 (alex@example.com)'
                 }
             });
             console.log(`Modrinth search returned ${response.data.hits?.length || 0} hits`);
@@ -47,7 +50,7 @@ let ModrinthService = class ModrinthService {
         try {
             const response = await axios_1.default.get(`${this.baseUrl}/project/${id}`, {
                 headers: {
-                    'User-Agent': 'AntigravityLauncher/1.0.0 (alex@example.com)'
+                    'User-Agent': 'NovaLink/1.0.0'
                 }
             });
             return response.data;
@@ -60,14 +63,14 @@ let ModrinthService = class ModrinthService {
     async getProjectVersions(id, gameVersion, loader) {
         try {
             const params = {};
-            if (loader)
-                params.loaders = JSON.stringify([loader.toLowerCase()]);
-            if (gameVersion)
-                params.game_versions = JSON.stringify([gameVersion]);
+            if (loader && loader !== 'Any')
+                params.loaders = loader.toLowerCase();
+            if (gameVersion && gameVersion !== 'Any')
+                params.game_versions = gameVersion;
             const response = await axios_1.default.get(`${this.baseUrl}/project/${id}/version`, {
                 params,
                 headers: {
-                    'User-Agent': 'AntigravityLauncher/1.0.0 (alex@example.com)'
+                    'User-Agent': 'NovaLink/1.0.0'
                 }
             });
             return response.data;
@@ -75,6 +78,24 @@ let ModrinthService = class ModrinthService {
         catch (error) {
             console.error(`Failed to get versions for ${id}`, error);
             throw new common_1.HttpException('Failed to get project versions', common_1.HttpStatus.BAD_GATEWAY);
+        }
+    }
+    async checkStatus() {
+        try {
+            const response = await axios_1.default.get('https://api.modrinth.com/');
+            return {
+                status: 'operational',
+                message: 'Modrinth API is online',
+                details: response.data
+            };
+        }
+        catch (error) {
+            console.error('Modrinth status check failed:', error.message);
+            return {
+                status: 'down',
+                message: 'Modrinth API is unreachable',
+                error: error.message
+            };
         }
     }
 };

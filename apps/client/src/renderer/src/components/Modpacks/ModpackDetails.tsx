@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Trash2, X, Loader2, AlertCircle, Eye, EyeOff, Search, Terminal, Play, Square, Folder, RotateCw } from 'lucide-react';
+import { Package, Trash2, X, Loader2, AlertCircle, Eye, EyeOff, Search, Terminal, Play, Square, Folder, RotateCw, Info } from 'lucide-react';
 import LauncherConsole from '../LauncherConsole';
 import ModSearch from './ModSearch';
 import ModDetailsModal from './ModDetailsModal';
 import { useLogs } from '../../contexts/LogContext';
 import { API_BASE_URL } from '../../config/api';
+import { playNotification } from '../../utils/sounds';
+
+import { SyncProgressModal } from '../Groups';
 
 interface ModpackDetailsProps {
     modpackId: string;
@@ -102,12 +105,14 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
             const rootPath = settings.mcPath || 'C:\\Minecraft';
 
+            const token = localStorage.getItem('token');
             await (window as any).api.syncModpack({
                 versionId: currentVersion.id,
                 modpackName: modpack.name,
                 rootPath,
                 gameVersion: currentVersion.gameVersion,
-                loaderType: currentVersion.loaderType
+                loaderType: currentVersion.loaderType,
+                token // Pass token to main process
             });
             await fetchDetails();
         } catch (err) {
@@ -127,21 +132,31 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         }
     };
 
-    const handleToggleMod = async (modId: string, currentStatus: boolean) => {
+    const handleToggleMod = async (mod: any, currentStatus: boolean) => {
         try {
-            await axios.patch(`${API_BASE_URL}/modpacks/mods/${modId}`, {
+            const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+            const rootPath = settings.mcPath || 'C:\\Minecraft';
+
+            // Toggle the physical file
+            const result = await (window as any).api.toggleModFile({
+                rootPath,
+                modpackName: modpack.name,
+                filename: mod.filename,
                 enabled: !currentStatus
             });
-            // Optimistic update
-            setModpack((prev: any) => {
-                if (!prev) return null;
-                const newVersions = [...prev.versions];
-                const version = newVersions[0];
-                version.mods = version.mods.map((m: any) =>
-                    m.id === modId ? { ...m, enabled: !currentStatus } : m
-                );
-                return { ...prev, versions: newVersions };
-            });
+
+            if (result.success) {
+                // Update API if it's a tracked mod
+                if (mod.id && !mod.isExternal) {
+                    await axios.patch(`${API_BASE_URL}/modpacks/mods/${mod.id}`, {
+                        enabled: !currentStatus
+                    });
+                }
+                // Refresh the disk files
+                await fetchDiskFiles(modpack, activeContentType);
+            } else {
+                console.error('Failed to toggle mod file:', result.error);
+            }
         } catch (err) {
             console.error('Failed to toggle mod:', err);
         }
@@ -153,18 +168,42 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
     // Filter DB mods by current active content type
     const dbMods = mods.filter((m: any) => m.projectType === activeContentType);
 
-    const mergedContent = diskFiles.map(filename => {
-        const dbMod = dbMods.find((m: any) => m.name.toLowerCase().includes(filename.replace('.jar', '').replace('.zip', '').toLowerCase()) || filename.toLowerCase().includes(m.name.toLowerCase()));
+    // Merged listing: Combine DB mods and Disk files
+    const diskMap = new Map(diskFiles.map(f => [f.replace('.disabled', '').toLowerCase(), f]));
+
+    // Start with all DB mods
+    const mergedContent = dbMods.map((dbMod: any) => {
+        const cleanName = dbMod.filename || `${dbMod.name}.jar`;
+        const diskFile = diskMap.get(cleanName.toLowerCase());
+        const isDisabled = diskFile?.endsWith('.disabled');
+
+        if (diskFile) diskMap.delete(cleanName.toLowerCase()); // Remove from diskMap so we can handle externals later
 
         return {
-            id: dbMod?.id || filename,
-            name: dbMod?.name || filename,
-            iconUrl: dbMod?.iconUrl,
-            modrinthId: dbMod?.modrinthId,
-            enabled: dbMod?.enabled ?? true,
-            isExternal: !dbMod,
-            filename
+            id: dbMod.id,
+            name: dbMod.name,
+            iconUrl: dbMod.iconUrl,
+            modrinthId: dbMod.modrinthId,
+            enabled: diskFile ? !isDisabled : true, // Default to true if not on disk yet
+            isExternal: false,
+            filename: diskFile || cleanName,
+            onDisk: !!diskFile
         };
+    });
+
+    // Add remaining disk files as external
+    diskMap.forEach((filename) => {
+        const isDisabled = filename.endsWith('.disabled');
+        mergedContent.push({
+            id: filename,
+            name: filename.replace('.disabled', ''),
+            iconUrl: null,
+            modrinthId: null,
+            enabled: !isDisabled,
+            isExternal: true,
+            filename: filename,
+            onDisk: true
+        });
     });
 
     // Filter content
@@ -174,6 +213,14 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         mod.filename.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const [showSyncModal, setShowSyncModal] = useState(false);
+    const [syncState, setSyncState] = useState<{
+        status: 'scanning' | 'downloading' | 'overrides' | 'completed' | 'error',
+        progress: number,
+        currentFile?: string,
+        error?: string
+    }>({ status: 'scanning', progress: 0 });
+
     const handleLaunch = async () => {
         if (!currentVersion) return;
 
@@ -182,6 +229,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
         // 1. Check Path
         if (!rootBase || rootBase.trim() === '') {
+            playNotification('warning');
             setPathNotification(true);
             return;
         }
@@ -190,15 +238,55 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         const storedAuth = localStorage.getItem('ms_auth');
         const storedProfile = localStorage.getItem('ms_profile');
         if (!settings.offlineMode && (!storedAuth || !storedProfile)) {
+            playNotification('warning');
             setAuthNotification(true);
             return;
         }
 
-        setLaunchingInfo({ id: modpackId, launching: true });
-        setLocalLaunching(true);
-        setActiveTab('logs'); // Auto switch to logs
+        // 3. Start Sync Process
+        setShowSyncModal(true);
+        setSyncState({ status: 'scanning', progress: 0 });
 
         try {
+            // Fetch Manifest
+            const token = localStorage.getItem('token');
+            let manifest;
+            try {
+                const response = await axios.get(`${API_BASE_URL}/sync/manifest/${currentVersion.id}`);
+                manifest = response.data;
+            } catch (err: any) {
+                console.error('Manifest fetch failed:', err);
+                const status = err.response?.status;
+                const targetUrl = `${API_BASE_URL}/sync/manifest/${currentVersion.id}`;
+                throw new Error(`Failed to fetch manifest (${status || 'Network Error'}). Target: ${targetUrl}. Are you online?`);
+            }
+
+            // Start Sync
+            const instanceId = modpack.name; // Using name as ID for simple file paths
+
+            // Subscribe to progress
+            const unsubscribe = (window as any).api.sync.onProgress((p: any) => {
+                setSyncState({
+                    status: p.status,
+                    progress: p.progress,
+                    currentFile: p.file
+                });
+            });
+
+            await (window as any).api.sync.start(instanceId, manifest, token);
+
+            unsubscribe();
+            setSyncState({ status: 'completed', progress: 100 });
+
+            // Wait a moment for visual completion
+            await new Promise(r => setTimeout(r, 1000));
+            setShowSyncModal(false);
+
+            // 4. Launch Game
+            setLaunchingInfo({ id: modpackId, launching: true });
+            setLocalLaunching(true);
+            setActiveTab('logs'); // Auto switch to logs
+
             // Determine Auth Logic
             let auth = { name: 'Player' };
 
@@ -235,10 +323,9 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 setError(`Launch failed: ${result.error}`);
             }
         } catch (err: any) {
-            console.error('Launch failed:', err);
-            setError('Failed to launch Minecraft.');
-            setLaunchingInfo({ id: null, launching: false });
-            setLocalLaunching(false);
+            console.error('Launch sequence failed:', err);
+            setSyncState(prev => ({ ...prev, status: 'error', error: err.message || 'Unknown error' }));
+            // Don't close modal on error, let user see it
         }
     };
 
@@ -455,13 +542,27 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleToggleMod(mod.id, mod.enabled ?? true);
+                                                        handleToggleMod(mod, mod.enabled ?? true);
                                                     }}
                                                     className={`p-4 rounded-2xl transition-all shadow-xl ${mod.enabled === false ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white'}`}
                                                     title={mod.enabled === false ? "Enable" : "Disable"}
                                                 >
                                                     {mod.enabled === false ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                                 </button>
+
+                                                {/* Mod Info Button */}
+                                                {mod.modrinthId && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setDetailedModId(mod.modrinthId);
+                                                        }}
+                                                        className="p-4 bg-blue-500/10 text-blue-500 rounded-2xl hover:bg-blue-500 hover:text-white transition-all shadow-xl"
+                                                        title="View mod details"
+                                                    >
+                                                        <Info className="w-5 h-5" />
+                                                    </button>
+                                                )}
 
                                                 {!mod.isExternal && (
                                                     <button
@@ -584,6 +685,16 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         </div>
                     )}
                 </div>
+            )}
+
+            {showSyncModal && (
+                <SyncProgressModal
+                    status={syncState.status}
+                    progress={syncState.progress}
+                    currentFile={syncState.currentFile}
+                    error={syncState.error}
+                    onClose={() => setShowSyncModal(false)}
+                />
             )}
 
             {detailedModId && (

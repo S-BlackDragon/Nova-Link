@@ -52,7 +52,6 @@ let MailService = class MailService {
         }
     }
     async sendPasswordResetEmail(email, username, token) {
-        const resetUrl = `http://localhost:5173/reset-password?token=${token}`;
         if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
             this.logCodeToConsole(email, username, token, 'RESET');
             return;
@@ -68,11 +67,11 @@ let MailService = class MailService {
             </div>
             <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 16px 16px;">
               <h2 style="color: #1e293b; margin-top: 0;">Password Reset Request</h2>
-              <p style="color: #475569; font-size: 16px;">Hello ${username}, click the button below to reset your password:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${resetUrl}" style="background: linear-gradient(135deg, #6366f1, #ec4899); color: white; padding: 15px 35px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 16px; display: inline-block;">Reset Password</a>
+              <p style="color: #475569; font-size: 16px;">Hello ${username}, use the code below to reset your password:</p>
+              <div style="background: #1e293b; padding: 25px; font-size: 36px; font-weight: bold; letter-spacing: 8px; text-align: center; border-radius: 12px; color: #facc15; margin: 25px 0;">
+                ${token}
               </div>
-              <p style="color: #64748b; font-size: 14px;">Or use this token: <code style="background: #e2e8f0; padding: 4px 8px; border-radius: 4px;">${token}</code></p>
+              <p style="color: #64748b; font-size: 14px;">This code expires in <strong>1 hour</strong>.</p>
               <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 25px 0;">
               <p style="color: #94a3b8; font-size: 12px; text-align: center;">If you didn't request this, please ignore this email.</p>
             </div>

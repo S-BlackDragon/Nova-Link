@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Plus, Loader2, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Package, Plus, Loader2, X, CheckCircle2, AlertCircle, ChevronDown, Layers, Terminal, Hash } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { API_BASE_URL } from '../../config/api';
 import { useLogs } from '../../contexts/LogContext';
@@ -14,13 +14,158 @@ interface ModpackSelectorProps {
     onSuccess: () => void;
 }
 
-export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', loader = 'fabric', onClose, onSuccess }: ModpackSelectorProps) {
+export default function ModpackSelector({ userId, mod, gameVersion: initialGameVersion = '1.20.1', loader = 'fabric', onClose, onSuccess }: ModpackSelectorProps) {
     const [showCreate, setShowCreate] = useState(false);
     const [newName, setNewName] = useState('');
+    const [selectedGameVersion, setSelectedGameVersion] = useState(initialGameVersion);
     const [selectedLoader, setSelectedLoader] = useState(loader.toLowerCase());
+    const [selectedLoaderVersion, setSelectedLoaderVersion] = useState('latest');
+    const [availableGameVersions, setAvailableGameVersions] = useState<string[]>(['1.21.1', '1.21', '1.20.6', '1.20.4', '1.20.1', '1.19.2', '1.18.2', '1.16.5']);
+    const [supportedLoaders, setSupportedLoaders] = useState<string[]>([]);
+    const [availableLoaderVersions, setAvailableLoaderVersions] = useState<string[]>([]);
+    const [loadingLoaderVersions, setLoadingLoaderVersions] = useState(false);
+    const [versionMap, setVersionMap] = useState<Map<string, Set<string>>>(new Map());
+
     const [success, setSuccess] = useState(false);
     const { setLaunchingInfo } = useLogs();
     const queryClient = useQueryClient();
+
+    // Auto-detect version and loader from mod metadata
+    useEffect(() => {
+        const detect = async () => {
+            try {
+                const response = await axios.get(`https://api.modrinth.com/v2/project/${mod.project_id || mod.slug}/version`);
+                if (response.data && response.data.length > 0) {
+                    const allVersions = new Set<string>();
+                    const map = new Map<string, Set<string>>(); // gameVer -> loaders
+
+                    response.data.forEach((v: any) => {
+                        // Filter out alpha/beta if needed? For now include all.
+                        v.game_versions?.forEach((gv: string) => {
+                            allVersions.add(gv);
+                            if (!map.has(gv)) map.set(gv, new Set());
+                            v.loaders?.forEach((l: string) => {
+                                map.get(gv)?.add(l.toLowerCase());
+                            });
+                        });
+                    });
+
+                    setVersionMap(map);
+
+                    // Update available versions based on mod support
+                    const supportedVersions = Array.from(allVersions)
+                        .filter(v => availableGameVersions.includes(v) || v.match(/^\d+\.\d+(\.\d+)?$/)) // standard versions
+                        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+
+                    if (supportedVersions.length > 0) {
+                        setAvailableGameVersions(supportedVersions);
+
+                        // Auto-select best version (newest)
+                        const bestVersion = supportedVersions[0];
+                        setSelectedGameVersion(bestVersion);
+
+                        // Loaders will be updated by the dependency effect on [selectedGameVersion]
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to auto-detect mod info:', err);
+            }
+        };
+        detect();
+    }, [mod.project_id, mod.slug]);
+
+    // Update supported loaders when game version changes
+    useEffect(() => {
+        if (versionMap.has(selectedGameVersion)) {
+            const loaders = Array.from(versionMap.get(selectedGameVersion) || []);
+            setSupportedLoaders(loaders);
+
+            // Auto-select best loader if current not supported
+            if (!loaders.includes(selectedLoader)) {
+                const loaderPriority = ['fabric', 'neoforge', 'forge', 'quilt'];
+                const bestLoader = loaderPriority.find(l => loaders.includes(l));
+                if (bestLoader) {
+                    setSelectedLoader(bestLoader);
+                } else if (loaders.length > 0) {
+                    setSelectedLoader(loaders[0]);
+                }
+            }
+        }
+    }, [selectedGameVersion, versionMap]);
+
+    // Fetch Loader Versions
+    useEffect(() => {
+        const fetchLoaderVersions = async () => {
+            setLoadingLoaderVersions(true);
+            setAvailableLoaderVersions([]);
+            setSelectedLoaderVersion('latest');
+
+            try {
+                if (selectedLoader === 'fabric') {
+                    const res = await axios.get('https://meta.fabricmc.net/v2/versions/loader');
+                    // Just take top 20 stable versions
+                    const versions = res.data.map((v: any) => v.version).slice(0, 20);
+                    setAvailableLoaderVersions(versions);
+                } else if (selectedLoader === 'quilt') {
+                    const res = await axios.get('https://meta.quiltmc.org/v3/versions/loader');
+                    const versions = res.data.map((v: any) => v.version).slice(0, 20);
+                    setAvailableLoaderVersions(versions);
+                } else if (selectedLoader === 'neoforge') {
+                    const res = await axios.get('https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml');
+                    const match = res.data.matchAll(/<version>(.*?)<\/version>/g);
+                    const all = Array.from(match).map((m: any) => m[1]);
+
+                    // Filter by MC version
+                    const gameParts = selectedGameVersion.split('.');
+                    const minor = parseInt(gameParts[1]);
+                    let filtered: string[] = [];
+
+                    if (minor >= 21) {
+                        // 21.x format
+                        const prefix = `${minor}.${gameParts[2] || 0}.`;
+                        filtered = all.filter(v => v.startsWith(prefix));
+                    } else {
+                        // 1.20 format "1.20.1-..."
+                        const prefix = `${selectedGameVersion}-`;
+                        filtered = all.filter(v => v.startsWith(prefix));
+                    }
+
+                    filtered.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+                    setAvailableLoaderVersions(filtered.slice(0, 30));
+                    if (filtered.length > 0) setSelectedLoaderVersion(filtered[0]);
+
+                } else if (selectedLoader === 'forge') {
+                    // Start with 'latest' and 'recommended' as explicit options, then list others if possible?
+                    // Forge maven is huge.
+                    // We'll use the promotions_slim.json to get recommended/latest
+                    const res = await axios.get('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json');
+                    const promos = res.data.promos;
+                    const specific: string[] = [];
+                    if (promos[`${selectedGameVersion}-latest`]) specific.push(promos[`${selectedGameVersion}-latest`]);
+                    if (promos[`${selectedGameVersion}-recommended`]) specific.push(promos[`${selectedGameVersion}-recommended`]);
+
+                    const unique = Array.from(new Set(specific));
+                    // If we want more, we need full maven xml. simpler for now.
+                    if (unique.length === 0) {
+                        setAvailableLoaderVersions(['latest']);
+                    } else {
+                        setAvailableLoaderVersions([...unique]);
+                        setSelectedLoaderVersion(unique[0]);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch loader versions', e);
+                setAvailableLoaderVersions(['latest']);
+            } finally {
+                setLoadingLoaderVersions(false);
+            }
+        };
+
+        if (showCreate) {
+            fetchLoaderVersions();
+        }
+    }, [selectedLoader, selectedGameVersion, showCreate]);
+
 
     // 1. Fetch Modpacks using useQuery
     const { data: modpacks = [], isLoading: loadingModpacks, error: modpacksError } = useQuery({
@@ -52,9 +197,9 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
             // 2. Create Initial Version
             const versionResponse = await axios.post(`${API_BASE_URL}/modpacks/${modpackResponse.data.id}/versions`, {
                 versionNumber: '1.0.0',
-                gameVersion: gameVersion,
+                gameVersion: selectedGameVersion,
                 loaderType: selectedLoader,
-                loaderVersion: 'latest'
+                loaderVersion: selectedLoaderVersion === 'latest' && selectedLoader === 'neoforge' ? availableLoaderVersions[0] : selectedLoaderVersion
             });
 
             // 3. Add Mod
@@ -62,7 +207,7 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
                 modrinthId: mod.project_id,
                 name: mod.title,
                 iconUrl: mod.icon_url,
-                versionId: mod.version || null
+                versionId: null // Let backend pick matching version
             });
 
             // 4. Create Local Instance Folder & Sync
@@ -75,8 +220,9 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
                 versionId: versionResponse.data.id,
                 modpackName: newName,
                 rootPath: mcPath,
-                gameVersion: gameVersion,
-                loaderType: selectedLoader
+                gameVersion: selectedGameVersion,
+                loaderType: selectedLoader,
+                neoForgeVersionId: selectedLoader === 'neoforge' ? `neoforge-${selectedLoaderVersion}` : undefined // Hint for backend/sync
             }).then(() => {
                 setLaunchingInfo({ id: null, launching: false });
             }).catch((err: any) => {
@@ -206,7 +352,7 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
                                         </div>
                                         <div>
                                             <p className="text-white font-black text-lg group-hover:text-indigo-400 transition-colors">{pack.name}</p>
-                                            <p className="text-slate-500 text-sm font-medium">{pack.versions?.[0]?.gameVersion || 'Unknown version'}</p>
+                                            <p className="text-slate-500 text-sm font-medium">{pack.versions?.[0]?.gameVersion || 'Unknown version'} • {pack.versions?.[0]?.loaderType}</p>
                                         </div>
                                     </div>
                                     <Plus className="w-6 h-6 text-slate-600 group-hover:text-indigo-400 group-hover:scale-110 transition-all" />
@@ -236,7 +382,7 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
                         </div>
                         <div className="space-y-6">
                             <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400">Modpack Name</label>
+                                <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-2">Modpack Name</label>
                                 <input
                                     type="text"
                                     placeholder="My Awesome Pack"
@@ -246,24 +392,92 @@ export default function ModpackSelector({ userId, mod, gameVersion = '1.20.1', l
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400">Mod Loader</label>
-                                <select
-                                    value={selectedLoader}
-                                    onChange={(e) => setSelectedLoader(e.target.value)}
-                                    className="w-full bg-slate-800 border border-white/5 rounded-xl p-4 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                >
-                                    <option value="fabric">Fabric</option>
-                                    <option value="forge">Forge</option>
-                                    <option value="neoforge">NeoForge</option>
-                                    <option value="quilt">Quilt</option>
-                                </select>
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-2">
+                                        <Layers className="w-3 h-3" />
+                                        Game Version
+                                    </label>
+                                    <div className="relative">
+                                        <select
+                                            value={selectedGameVersion}
+                                            onChange={(e) => setSelectedGameVersion(e.target.value)}
+                                            className="w-full appearance-none bg-slate-800 border border-white/5 rounded-xl p-4 pr-10 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                                        >
+                                            {availableGameVersions.map(v => (
+                                                <option key={v} value={v}>{v}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5 pointer-events-none" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-2">
+                                        <Terminal className="w-3 h-3" />
+                                        Loader Type
+                                    </label>
+                                    <div className="relative">
+                                        <select
+                                            value={selectedLoader}
+                                            onChange={(e) => setSelectedLoader(e.target.value)}
+                                            className="w-full appearance-none bg-slate-800 border border-white/5 rounded-xl p-4 pr-10 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                                        >
+                                            {supportedLoaders.length > 0 ? (
+                                                supportedLoaders.map(l => (
+                                                    <option key={l} value={l}>
+                                                        {l.charAt(0).toUpperCase() + l.slice(1)}
+                                                    </option>
+                                                ))
+                                            ) : (
+                                                ['fabric', 'forge', 'neoforge', 'quilt'].map(l => (
+                                                    <option key={l} value={l}>
+                                                        {l.charAt(0).toUpperCase() + l.slice(1)}
+                                                    </option>
+                                                ))
+                                            )}
+                                        </select>
+                                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5 pointer-events-none" />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-2">
+                                        <Hash className="w-3 h-3" />
+                                        Loader Version
+                                    </label>
+                                    <div className="relative">
+                                        <select
+                                            value={selectedLoaderVersion}
+                                            onChange={(e) => setSelectedLoaderVersion(e.target.value)}
+                                            disabled={loadingLoaderVersions}
+                                            className="w-full appearance-none bg-slate-800 border border-white/5 rounded-xl p-4 pr-10 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+                                        >
+                                            {loadingLoaderVersions ? (
+                                                <option>Loading...</option>
+                                            ) : availableLoaderVersions.length > 0 ? (
+                                                availableLoaderVersions.map(v => (
+                                                    <option key={v} value={v}>{v}</option>
+                                                ))
+                                            ) : (
+                                                <option value="latest">Latest</option>
+                                            )}
+                                        </select>
+                                        {loadingLoaderVersions ? (
+                                            <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 text-indigo-500 w-5 h-5 animate-spin" />
+                                        ) : (
+                                            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5 pointer-events-none" />
+                                        )}
+                                    </div>
+                                </div>
                             </div>
 
                             <button
                                 onClick={() => quickCreateMutation.mutate()}
                                 disabled={quickCreateMutation.isPending || !newName.trim()}
-                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-xl font-black transition-all disabled:opacity-50 mt-4"
+                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-xl font-black transition-all disabled:opacity-50 mt-4 active:scale-[0.98] shadow-xl"
                             >
                                 {quickCreateMutation.isPending ? <Loader2 className="w-6 h-6 animate-spin mx-auto" /> : 'Create & Add Mod'}
                             </button>

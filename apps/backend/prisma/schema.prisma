@@ -27,6 +27,7 @@ model User {
   resetToken         String?
   resetExpires       DateTime?
   curseforgeToken    String?
+  avatarUrl          String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -86,6 +87,8 @@ model ModpackVersion {
   loaderType      String?  // e.g., "forge", "fabric", "neoforge"
   loaderVersion   String?
   manifestUrl     String?
+  manifestJson    Json?    // Authoritative manifest data
+  overridesKey    String?  // S3/MinIO key for overrides.zip
   parentVersionId String?
   isPublished     Boolean  @default(false)
   createdAt       DateTime @default(now())
@@ -101,14 +104,32 @@ model ModpackVersion {
 }
 
 model Mod {
-  id                String   @id @default(uuid())
-  modpackVersionId  String
-  modrinthId        String
-  name              String
-  versionId         String?  // Modrinth version ID
-  iconUrl           String?
-  projectType       String   @default("mod")
-  enabled           Boolean  @default(true)
+  id          String   @id @default(cuid())
+  name        String
+  iconUrl     String?
+  summary     String?
+  author      String?
   
-  version           ModpackVersion @relation(fields: [modpackVersionId], references: [id], onDelete: Cascade)
+  // Modrinth/CF Identifiers
+  modrinthId  String?   // Project ID
+  curseforgeId String?
+  versionId   String?   // Specific Version ID (e.g. Modrinth Version ID)
+
+  // File Metadata (Critical for Sync)
+  filename    String?
+  url         String?   // Direct download URL
+  sha1        String?
+  size        Int?
+  
+  // Config/Structure
+  enabled     Boolean  @default(true)
+  side        String   @default("both") // client, server, both
+  
+  projectType String   @default("mod") // mod, resourcepack, shader
+
+  modpackVersionId String
+  modpackVersion   ModpackVersion @relation(fields: [modpackVersionId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

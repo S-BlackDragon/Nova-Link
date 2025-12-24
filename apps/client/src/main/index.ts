@@ -1,28 +1,307 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import path from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { spawn } from 'child_process'
 import axios from 'axios'
+import fs from 'fs'
+import { randomUUID } from 'crypto'
 import { updateService } from './update'
 import { Auth } from 'msmc'
+import { ensureJava, JavaVersion } from './javaManager'
+import { SyncService } from './services/SyncService'
+
 // Define API Base URL for main process
 const API_BASE_URL = 'http://163.192.96.105:3000';
 
+async function generateManifestFromArgs(args: any) {
+  if (!args.versionId) return { files: [], overrides: null };
+  try {
+    const config: any = {};
+    if (args.token) {
+      config.headers = { Authorization: `Bearer ${args.token}` };
+    }
+    const response = await axios.get(`${API_BASE_URL}/sync/manifest/${args.versionId}`, config);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch manifest:', error);
+    throw error;
+  }
+}
+
+// Global reference to main window for update service
 // Global reference to main window for update service
 let mainWindow: BrowserWindow | null = null
+
+function getJavaVersion(mcVer: string): JavaVersion {
+  // Simple heuristic
+  const parts = mcVer.split('.');
+  const minor = parseInt(parts[1]);
+  const patch = parts[2] ? parseInt(parts[2]) : 0;
+
+  if (minor >= 21) return 21; // 1.21+ -> Java 21
+  if (minor === 20 && patch >= 5) return 21; // 1.20.5+ -> Java 21
+  if (minor >= 17) return 17; // 1.17 - 1.20.4 -> Java 17
+  // 1.16.5 usually runs on Java 8, but supports 11/17 sometimes? 
+  // Standard is Java 8 for < 1.17
+  return 8;
+}
+
+// Helper to run Java Installer JAR
+async function runInstaller(url: string, destPath: string, mcPath: string, event: any, javaPath: string) {
+  // CRITICAL: Installers often need 'java.exe' (console) not 'javaw.exe' (windowless) to run correctly and output logs
+  let installerJava = javaPath;
+  if (process.platform === 'win32' && installerJava.includes('javaw.exe')) {
+    installerJava = installerJava.replace('javaw.exe', 'java.exe');
+  }
+
+  // Log Java version for debugging
+  try {
+    const vCheck = spawn(installerJava, ['-version']);
+    vCheck.stdout?.on('data', (d) => event.sender.send('launcher-log', `[Java Info] ${d}`));
+    vCheck.stderr?.on('data', (d) => event.sender.send('launcher-log', `[Java Info] ${d}`));
+  } catch (e) { /* ignore */ }
+
+  event.sender.send('launcher-log', `[Installer] Downloading ${url}...`);
+  try {
+    const resp = await axios.get(url, { responseType: 'arraybuffer' });
+    fs.writeFileSync(destPath, resp.data);
+  } catch (e: any) {
+    throw new Error(`Failed to download installer: ${e.message}`);
+  }
+
+  event.sender.send('launcher-log', `[Installer] Running Java Installer: ${destPath}`);
+
+  // Pre-create launcher_profiles.json if missing (Installer requirement)
+  const profilesPath = path.join(mcPath, 'launcher_profiles.json');
+  if (!fs.existsSync(profilesPath)) {
+    try {
+      if (!fs.existsSync(mcPath)) fs.mkdirSync(mcPath, { recursive: true });
+      fs.writeFileSync(profilesPath, JSON.stringify({ profiles: {} }));
+    } catch (e) { /* ignore */ }
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    // Correct args: --installClient [path]
+    const args = ['-jar', destPath, '--installClient', mcPath];
+    event.sender.send('launcher-log', `[Installer] CMD: ${installerJava} ${args.join(' ')}`);
+
+    const proc = spawn(installerJava, args, { stdio: 'pipe', cwd: mcPath });
+
+    proc.stdout.on('data', (d) => {
+      const line = d.toString();
+      console.log(`[Installer] ${line}`);
+      event.sender.send('launcher-log', `[Installer] ${line}`);
+    });
+
+    // Capture stderr for potential errors
+    let errorLog = '';
+    proc.stderr.on('data', (d) => {
+      const line = d.toString();
+      errorLog += line;
+      // NeoForge installer outputs normal progress to stderr sometimes.
+      console.log(`[Installer Output] ${line}`);
+      event.sender.send('launcher-log', `[Installer Output] ${line}`);
+    });
+
+    proc.on('error', (err) => {
+      if ((err as any).code === 'ENOENT') {
+        reject(new Error(`Java executable not found at ${javaPath}.`));
+      } else {
+        reject(err);
+      }
+    });
+
+    proc.on('close', (code) => {
+      try { fs.unlinkSync(destPath); } catch (e) { /* ignore */ }
+      if (code === 0) resolve();
+      else {
+        const errMsg = `Installer exited with code ${code}.\n\nError Output:\n${errorLog.slice(-1000)}`;
+        dialog.showErrorBox('Installer Failed', errMsg);
+        reject(new Error(errMsg));
+      }
+    });
+  });
+}
+
+// FIX: Helper to resolve NeoForge placeholders that MCLC 3.x fails to handle
+// AND inject necessary JVM arguments for modern Java
+function fixVersionJson(versionsPath: string, versionId: string, mcPath: string) {
+  const jsonPath = path.join(versionsPath, versionId, `${versionId}.json`);
+  if (!fs.existsSync(jsonPath)) return;
+
+  try {
+    let content = fs.readFileSync(jsonPath, 'utf8');
+    const libDir = path.join(mcPath, 'libraries').replace(/\\/g, '/');
+    const cpSep = process.platform === 'win32' ? ';' : ':';
+
+    // Resolve basic placeholders
+    content = content.replace(/\${library_directory}/g, libDir);
+    content = content.replace(/\${classpath_separator}/g, cpSep);
+    content = content.replace(/\${version_name}/g, versionId);
+
+    // Parse JSON to inject JVM args
+    const json = JSON.parse(content);
+
+    // Ensure arguments object exists
+    if (!json.arguments) json.arguments = {};
+
+    // Ensure jvm array exists
+    if (!json.arguments.jvm) json.arguments.jvm = [];
+
+    // Generate library paths for the module path
+
+    // Generate library paths for the module path
+    // We need to find these specific libraries in the json.libraries list to get their relative paths
+    // But for now, we can try to construct them if we assume identifying names.
+    // However, the robust way is to finding them by name in the library list.
+
+    const libraries = json.libraries || [];
+    const findLibPath = (namePart: string) => {
+      const lib = libraries.find((l: any) => l.name.includes(namePart));
+      if (!lib || !lib.downloads || !lib.downloads.artifact || !lib.downloads.artifact.path) return null;
+      return path.join(libDir, lib.downloads.artifact.path).replace(/\\/g, '/');
+    };
+
+    const bootLauncher = findLibPath('bootstraplauncher');
+
+    const secureJarHandler = findLibPath('securejarhandler');
+    const asmCommons = findLibPath('asm-commons');
+    const asmUtil = findLibPath('asm-util');
+    const asmAnalysis = findLibPath('asm-analysis');
+    const asmTree = findLibPath('asm-tree');
+    const asm = findLibPath('asm:'); // Colon to avoid matching others if possible, or just 'asm-' but verify
+    const jarJar = findLibPath('JarJarFileSystems');
+
+    // Fallback: If bootLauncher is missing in libraries (installer fail?), we can't build the path.
+    // We should log this CRITICAL failure.
+
+    const neoforgeArgs: string[] = [];
+
+    // Only apply these NeoForge specific args if we found the boot launcher (indicator of NeoForge)
+    if (bootLauncher) {
+      const modulePath = [
+        bootLauncher,
+        secureJarHandler,
+        asmCommons,
+        asmUtil,
+        asmAnalysis,
+        asmTree,
+        asm,
+        jarJar
+      ].filter(p => p).join(cpSep);
+
+      neoforgeArgs.push(
+        '-DignoreList=client-extra,${version_name}.jar',
+        `-DlibraryDirectory=${libDir}`,
+        // Note: MCLC might not resolve specific custom placeholders inside args keys unless we do it.
+        // But we already resolve ${library_directory} in the content string before parsing? 
+        // Yes, but we should use absolute paths here to be safe since we resolved libDir.
+
+        '-p', modulePath,
+        '--add-modules', 'ALL-MODULE-PATH',
+        '--add-opens', 'java.base/java.util.jar=cpw.mods.securejarhandler',
+        '--add-opens', 'java.base/java.lang.invoke=cpw.mods.securejarhandler',
+        '--add-exports', 'java.base/sun.security.util=cpw.mods.securejarhandler',
+        '--add-exports', 'jdk.naming.dns/com.sun.jndi.dns=java.naming'
+      );
+    } else {
+      // Fallback for older Forge or if libs not found (standard Java 17+ args)
+      neoforgeArgs.push(
+        '--add-opens', 'java.base/java.util.jar=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.lang.invoke=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.io=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.nio=ALL-UNNAMED',
+        '--add-opens', 'java.base/sun.nio.ch=ALL-UNNAMED',
+        '--add-opens', 'java.base/java.util.zip=ALL-UNNAMED'
+      );
+    }
+
+    // We still want the generic ones for compatibility? 
+    // The reference only has the specific ones. Let's stick to the specific ones if NeoForge.
+
+    const argsToInject = neoforgeArgs;
+
+    // Aggressively cleanup existing args that conflict or are stale
+    // We remove any -p, --add-modules, --add-opens, or -DignoreList that we manage
+    if (json.arguments.jvm) {
+      json.arguments.jvm = json.arguments.jvm.filter(arg =>
+        !arg.includes('bootstraplauncher') &&
+        !arg.includes('securejarhandler') &&
+        !arg.includes('ALL-MODULE-PATH') &&
+        !arg.startsWith('-DignoreList') &&
+        !arg.startsWith('-DlibraryDirectory')
+      );
+    } else {
+      json.arguments.jvm = [];
+    }
+
+    // Now always inject if we found the launcher (or fallback)
+    if (bootLauncher) {
+      json.arguments.jvm.push(...argsToInject);
+    } else {
+      // Generic args (check if already present to avoid dupe since we didn't filter generic opens specifically above)
+      const hasGeneric = json.arguments.jvm.some(arg => arg.includes('java.base/java.util.jar=ALL-UNNAMED'));
+      if (!hasGeneric) {
+        json.arguments.jvm.push(...argsToInject);
+      }
+    }
+
+    // Re-resolve placeholders that might be in the new args if we used them (we verified absolute paths above though)
+    // We replaced ${version_name} in the content string before parsing, so it's gone.
+    // However, -DignoreList uses ${version_name}.jar literal which we want to preserve? 
+    // No, we want it to be the actual version ID.
+    json.arguments.jvm = json.arguments.jvm.map(arg => arg.replace(/\${version_name}/g, versionId));
+
+    fs.writeFileSync(jsonPath, JSON.stringify(json, null, 2));
+  } catch (e) {
+    console.error(`[FIX] Failed to patch ${versionId}.json:`, e);
+  }
+}
+
+// FIX: Helper to ensure vanilla files are present before installer runs
+async function downloadVanilla(launcher: any, version: string, mcPath: string, event: any) {
+  event.sender.send('launcher-log', `[INFO] Pre-downloading vanilla files for ${version}...`);
+  const opts = {
+    authorization: { name: 'Player' },
+    root: mcPath,
+    version: { number: version, type: 'release' },
+    memory: { max: '1G', min: '512M' },
+    // Use skipLaunch if supported or just allow it to download
+    // We don't actually want to start the process
+  };
+
+  // Most versions of MCLC will download missing assets/libraries when launch is called.
+  // We catch the error that happens because we don't actually want to launch.
+  try {
+    const child = await launcher.launch({ ...opts, window: { width: 0, height: 0 } });
+    child.kill();
+  } catch (e) {
+    // We expect errors or we killed it
+  }
+
+  const vanillaJson = path.join(mcPath, 'versions', version, `${version}.json`);
+  if (fs.existsSync(vanillaJson)) {
+    event.sender.send('launcher-log', `[INFO] Vanilla files for ${version} are verified.`);
+  } else {
+    event.sender.send('launcher-log', `[WARN] Vanilla files might be missing after download attempt.`);
+  }
+}
 
 function createWindow(): void {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 800,
+    width: 1024,
+    height: 750,
     minWidth: 1024,
     minHeight: 700,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false
     }
   })
@@ -43,7 +322,7 @@ function createWindow(): void {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 }
 
@@ -51,8 +330,6 @@ const runningInstances = new Map<string, any>();
 
 // Global sync function to be used by both launch and standalone sync IPC
 async function syncModpackFiles(_event: any, options: any) {
-  const fs = require('fs');
-  const path = require('path');
 
   const modpackName = options.modpackName || 'default';
   const safeName = modpackName.replace(/[^a-zA-Z0-9-]/g, '_');
@@ -86,7 +363,11 @@ async function syncModpackFiles(_event: any, options: any) {
 
     if (options.versionId) {
       sendStatus('Fetching manifest...', 10);
-      const response = await axios.get(`${API_BASE_URL}/modpacks/versions/${options.versionId}/manifest`);
+      const config: any = {};
+      if (options.token) {
+        config.headers = { Authorization: `Bearer ${options.token}` };
+      }
+      const response = await axios.get(`${API_BASE_URL}/sync/manifest/${options.versionId}`, config);
       const manifest = response.data;
       const downloadedMods = new Set<string>();
 
@@ -297,16 +578,43 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('sync-modpack', async (_event, options: any) => {
-    return await syncModpackFiles(_event, options);
+  const syncService = new SyncService(app.getPath('userData'));
+
+  ipcMain.handle('sync:modpack', async (_, args) => {
+    // We don't have a specific instanceId in this call args usually, assuming modpackName or using ID
+    // Need to verify standard args. The current call pass { modpackName ... }.
+    // Let's assume modpackName IS the instance identifier for now, or we need to pass instanceId.
+    // The current api.createInstance uses modpackName as folder name.
+    // So instanceId = modpackName.
+    // Wait, syncModpack args are: { versionId, modpackName, rootPath ... }
+    return syncService.startSync(args.modpackName, await generateManifestFromArgs(args), (progress) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('sync:progress', { instanceId: args.modpackName, ...progress });
+      }
+    });
+  });
+
+  ipcMain.handle('sync:cancel', (_, instanceId) => {
+    syncService.cancelSync(instanceId);
+  });
+
+
+
+  ipcMain.handle('sync:start', async (event, instanceId: string, manifest: any, token?: string) => {
+    try {
+      await syncService.startSync(instanceId, manifest, (progress) => {
+        event.sender.send('sync:progress', progress);
+      }, token);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Sync failed:', error);
+      return { success: false, error: error.message };
+    }
   });
 
   ipcMain.handle('launch-minecraft', async (_event, options: any) => {
     const { Client } = require('minecraft-launcher-core');
     const launcher = new Client();
-    const fs = require('fs');
-    const path = require('path');
-    const crypto = require('crypto');
 
     const modpackName = options.modpackName || 'default';
     const safeName = modpackName.replace(/[^a-zA-Z0-9-]/g, '_');
@@ -314,12 +622,18 @@ app.whenReady().then(() => {
     const mcPath = path.join(rootBase, 'instances', safeName);
     const versionsPath = path.join(mcPath, 'versions');
 
+    const logToFile = (msg: string) => {
+      console.log(`[Launcher] ${msg}`);
+    };
+
     const sendStatus = (status: string, progress?: number) => {
       _event.sender.send('launch-status', { status, progress });
+      logToFile(`[STATUS] ${status} (${progress}%)`);
     };
 
     const sendError = (error: string) => {
       _event.sender.send('launch-close', 1);
+      logToFile(`[ERROR] ${error}`);
       return { success: false, error };
     };
 
@@ -328,6 +642,18 @@ app.whenReady().then(() => {
       const syncResult = await syncModpackFiles(_event, options);
       if (!syncResult.success) return sendError(syncResult.error);
 
+      // ENSURE JAVA
+      const reqJava = getJavaVersion(options.gameVersion);
+      sendStatus(`Checking Java ${reqJava} Runtime...`, 15);
+      const javaPath = await ensureJava(reqJava, _event);
+      // Store for launcher
+      options.javaPath = javaPath;
+      logToFile(`[JAVA] Path: ${javaPath}`);
+
+      // FIX: Ensure vanilla files are present for Forge/NeoForge installers
+      if (options.loaderType === 'forge' || options.loaderType === 'neoforge') {
+        await downloadVanilla(launcher, options.gameVersion, mcPath, _event);
+      }
       if (options.loaderType === 'fabric') {
         sendStatus('Installing Fabric...', 60);
         const fMeta = await axios.get('https://meta.fabricmc.net/v2/versions/loader', { timeout: 10000 });
@@ -360,118 +686,208 @@ app.whenReady().then(() => {
       } else if (options.loaderType === 'neoforge') {
         sendStatus('Installing NeoForge...', 60);
         try {
-          // NeoForge versions usually look like "21.1.65" (for 1.21.1) or "1.20.1-47.1.104" (for older).
-          // We'll standardly look for the latest version compatible with the game version from Maven Metadata
+          // NeoForge versioning:
+          // - For 1.20.x: "1.20.1-47.1.104"
+          // - For 1.21.x: "21.1.65"
           const metadataUrl = 'https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml';
-          const metaResp = await axios.get(metadataUrl, { timeout: 10000 });
+          const metaResp = await axios.get(metadataUrl, { timeout: 15000 });
           const xml = metaResp.data;
-
-          // Simple regex to find versions starting with gameVersion
-          // For simplicity in this regex, we find all <version>...</version> tags
           const versionMatches: string[] = Array.from(xml.matchAll(/<version>(.*?)<\/version>/g)).map((m: any) => m[1]);
 
+          const gameVer = options.gameVersion;
+          const gParts = gameVer.split('.');
+          const minorMC = parseInt(gParts[1]);
+          const patchMC = gParts[2] || '0';
+
           let validVersions: string[] = [];
-          const gParts = options.gameVersion.split('.');
-          const major = gParts[1]; // 20, 21
-          const minor = gParts[2] || '0';
+          if (minorMC >= 21) {
+            const prefix = `${minorMC}.${patchMC}.`;
+            validVersions = versionMatches.filter(v => v.startsWith(prefix));
+          } else {
+            const prefix = `${gameVer}-`;
+            validVersions = versionMatches.filter(v => v.startsWith(prefix));
+          }
 
-          validVersions = versionMatches.filter(v =>
-            v.startsWith(options.gameVersion + '-') ||
-            (parseInt(major) >= 20 && v.startsWith(`${major}.${minor}.`))
-          );
+          validVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+          const latestNeo = validVersions[validVersions.length - 1]; // Get last (latest)
 
-          const latestNeo = validVersions.pop(); // Last one is usually latest in maven-metadata
+          if (!latestNeo) throw new Error(`Could not find NeoForge version for ${gameVer}`);
 
-          if (!latestNeo) throw new Error('Could not find compatible NeoForge version');
+          _event.sender.send('launcher-log', `[INFO] Selected NeoForge: ${latestNeo}`);
 
-          const vId = `neoforge-${latestNeo}`;
-          const vDir = path.join(versionsPath, vId);
+          const vDir = path.join(versionsPath, `neoforge-${latestNeo}`);
           if (!fs.existsSync(vDir)) fs.mkdirSync(vDir, { recursive: true });
 
-          // Fallback: Try downloading the main version json.
-          const jsonUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${latestNeo}/neoforge-${latestNeo}.json`;
-          console.log(`[NEOFORGE] Fetching JSON: ${jsonUrl}`);
+          const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${latestNeo}/neoforge-${latestNeo}-installer.jar`;
+          const installerPath = path.join(versionsPath, `neoforge-${latestNeo}-installer.jar`);
 
-          try {
-            const jResp = await axios.get(jsonUrl, { timeout: 10000 });
-            const neoJson = jResp.data;
-            neoJson.id = vId;
-            fs.writeFileSync(path.join(vDir, `${vId}.json`), JSON.stringify(neoJson, null, 2));
-            options.neoForgeVersionId = vId;
-          } catch (e) {
-            console.warn('[NEOFORGE] Failed to get main json, trying distinct client json?');
-            throw e;
+          await runInstaller(installerUrl, installerPath, mcPath, _event, javaPath);
+
+
+          // Auto-detect installed NeoForge version ID
+          // Installer creates a folder in versions/, usually naming it "neoforge-{ver}" or "{mcVer}-neoforge-{ver}"
+          // We scan for the directory matching neoforge and recent time
+          const installedDirs = fs.readdirSync(versionsPath).filter(d => d.includes('neoforge'));
+          // Sort by mtime desc
+          installedDirs.sort((a, b) => fs.statSync(path.join(versionsPath, b)).mtimeMs - fs.statSync(path.join(versionsPath, a)).mtimeMs);
+
+          if (installedDirs.length > 0) {
+            const detectedId = installedDirs[0];
+            options.neoForgeVersionId = detectedId;
+            _event.sender.send('launcher-log', `[INFO] Detected installed NeoForge ID: ${detectedId}`);
+
+            // FIX: Resolve placeholders in the newly installed NeoForge JSON
+            fixVersionJson(versionsPath, detectedId, mcPath);
+          } else {
+            // Fallback
+            options.neoForgeVersionId = `neoforge-${latestNeo}`;
+            fixVersionJson(versionsPath, options.neoForgeVersionId, mcPath);
           }
 
         } catch (err: any) {
-          console.error('[NEOFORGE] Setup failed:', err);
-          return sendError('Failed to setup NeoForge: ' + err.message);
+          console.error('[NEOFORGE] Error:', err);
+          _event.sender.send('launcher-log', `[ERROR] NeoForge Setup: ${err.message}`);
+          return sendError('NeoForge Setup Failed: ' + err.message);
         }
+
       } else if (options.loaderType === 'forge') {
         sendStatus('Installing Forge...', 60);
         try {
           const pResp = await axios.get('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json', { timeout: 10000 });
-          const latest = pResp.data.promos[`${options.gameVersion}-latest`];
-          if (!latest) {
-            console.warn('[FORGE] No latest version found, trying to infer...');
-          }
-          let fVer = null;
-          if (latest) {
-            fVer = latest.startsWith(options.gameVersion) ? latest : `${options.gameVersion}-${latest}`;
-          }
 
-          if (fVer) {
-            const vId = `${options.gameVersion}-forge-${latest}`;
-            const vDir = path.join(versionsPath, vId);
-            if (!fs.existsSync(vDir)) fs.mkdirSync(vDir, { recursive: true });
-
-            const jsonUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${fVer}/forge-${fVer}.json`;
-            console.log(`[FORGE] Downloading JSON from ${jsonUrl}`);
-            _event.sender.send('launcher-log', `[DEBUG] Forge URL: ${jsonUrl}`);
-
-            let forgeJson: any = null;
-            try {
-              const jResp = await axios.get(jsonUrl, { timeout: 15000 });
-              forgeJson = jResp.data;
-            } catch (err) {
-              console.warn('[FORGE] JSON download failed, trying Installer JAR fallback...');
-              // Fallback: Download Installer JAR and extract version.json
-              const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${fVer}/forge-${fVer}-installer.jar`;
-              const AdmZip = require('adm-zip');
-              const os = require('os');
-              const tempInstallerPath = path.join(os.tmpdir(), `forge-${fVer}-installer.jar`);
-
-              const iResp = await axios.get(installerUrl, { responseType: 'arraybuffer', timeout: 30000 });
-              fs.writeFileSync(tempInstallerPath, Buffer.from(iResp.data));
-
-              const zip = new AdmZip(tempInstallerPath);
-              let jsonEntry = zip.getEntry('version.json');
-              if (!jsonEntry) jsonEntry = zip.getEntry(`forge-${fVer}.json`); // sometimes it's named differently
-
-              if (jsonEntry) {
-                forgeJson = JSON.parse(jsonEntry.getData().toString('utf8'));
-              } else {
-                throw new Error('Could not find version.json in Forge Installer');
-              }
-
-              // Cleanup
-              if (fs.existsSync(tempInstallerPath)) fs.unlinkSync(tempInstallerPath);
-            }
-
-            if (forgeJson) {
-              forgeJson.id = vId;
-              fs.writeFileSync(path.join(vDir, `${vId}.json`), JSON.stringify(forgeJson, null, 2));
-              options.forgeVersionId = vId;
-            } else {
-              throw new Error('Failed to obtain Forge Version JSON');
+          let fVer = options.loaderVersion && options.loaderVersion !== 'latest' ? options.loaderVersion : null;
+          if (!fVer) {
+            const latest = pResp.data.promos[`${options.gameVersion}-latest`];
+            if (latest) {
+              fVer = latest.startsWith(options.gameVersion) ? latest : `${options.gameVersion}-${latest}`;
             }
           }
+
+          if (!fVer) throw new Error('Could not determine Forge version');
+
+          _event.sender.send('launcher-log', `[INFO] Selected Forge: ${fVer}`);
+          const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${fVer}/forge-${fVer}-installer.jar`;
+          const installerPath = path.join(versionsPath, `forge-${fVer}-installer.jar`);
+
+          await runInstaller(installerUrl, installerPath, mcPath, _event, javaPath);
+
+          // Auto-detect installed Forge version ID
+          const installedDirs = fs.readdirSync(versionsPath).filter(d => d.includes('forge') && d.includes(options.gameVersion));
+          installedDirs.sort((a, b) => fs.statSync(path.join(versionsPath, b)).mtimeMs - fs.statSync(path.join(versionsPath, a)).mtimeMs);
+
+          if (installedDirs.length > 0) {
+            const detectedId = installedDirs[0];
+            options.forgeVersionId = detectedId;
+            _event.sender.send('launcher-log', `[INFO] Detected installed Forge ID: ${detectedId}`);
+
+            // FIX: Resolve placeholders in the newly installed Forge JSON
+            fixVersionJson(versionsPath, detectedId, mcPath);
+          } else {
+            options.forgeVersionId = `${options.gameVersion}-forge-${fVer}`;
+            fixVersionJson(versionsPath, options.forgeVersionId, mcPath);
+          }
+
+          _event.sender.send('launcher-log', `[INFO] Forge setup complete.`);
+
         } catch (err: any) {
-          console.error('[FORGE] Setup failed:', err);
-          return sendError('Failed to setup Forge: ' + err.message);
+          console.error('[FORGE] Error:', err);
+          _event.sender.send('launcher-log', `[ERROR] Forge Setup: ${err.message}`);
+          return sendError('Forge Setup Failed: ' + err.message);
         }
       }
 
+      // FIX: Add JVM options for modern Java (17+) if needed
+      // We explicitly construct NeoForge arguments here because modifying version.json isn't reliable with MCLC
+      if (!options.customArgs) options.customArgs = [];
+      const JVM_OPTIONS = [
+        '-XX:+UnlockExperimentalVMOptions',
+        '-XX:+UseG1GC',
+        '-XX:G1NewSizePercent=20',
+        '-XX:G1ReservePercent=20',
+        '-XX:MaxGCPauseMillis=50',
+        '-XX:G1HeapRegionSize=32M'
+      ];
+      options.customArgs.push(...JVM_OPTIONS);
+
+      // NeoForge / Modern Forge specific logic
+      if (options.loaderType === 'neoforge' || (options.loaderType === 'forge' && parseInt(options.gameVersion.split('.')[1]) >= 17)) {
+        const versionId = options.neoForgeVersionId || options.forgeVersionId || options.gameVersion; // fallbacks
+        const libDir = path.join(mcPath, 'libraries');
+        const cpSep = process.platform === 'win32' ? ';' : ':';
+
+        // Helper to find lib path - we might need to read the JSON to know exact versions,
+        // or we can scan the lib dir for matching jars if we are lazy, but reading JSON is safer if we can find it.
+        // Let's rely on scanning since we might not have the JSON fully resolved in this scope yet?
+        // Actually we can read the json file we just patched or looked at.
+
+        let foundNeoArgs = false;
+        try {
+          // We need to find the version json file
+          // It's usually in ./versions/<versionId>/<versionId>.json
+          const vJsonPath = path.join(versionsPath, versionId || '', (versionId || '') + '.json');
+          if (fs.existsSync(vJsonPath)) {
+            const json = JSON.parse(fs.readFileSync(vJsonPath, 'utf8'));
+            const libraries = json.libraries || [];
+            const findLibPath = (namePart: string) => {
+              const lib = libraries.find((l: any) => l.name.includes(namePart));
+              if (!lib || !lib.downloads || !lib.downloads.artifact || !lib.downloads.artifact.path) return null;
+              return path.join(libDir, lib.downloads.artifact.path).replace(/\\/g, '/'); // Force forward slashes for Java args if needed, or stick to OS.
+            };
+
+            const bootLauncher = findLibPath('bootstraplauncher');
+            if (bootLauncher) {
+              const secureJarHandler = findLibPath('securejarhandler');
+              const asmCommons = findLibPath('asm-commons');
+              const asmUtil = findLibPath('asm-util');
+              const asmAnalysis = findLibPath('asm-analysis');
+              const asmTree = findLibPath('asm-tree');
+              const asm = findLibPath('org.ow2.asm:asm:') || findLibPath('asm:asm:') || findLibPath('asm-9');
+
+              const jarJar = findLibPath('JarJarFileSystems');
+              const mavenArtifact = findLibPath('maven-artifact');
+
+              const modulePath = [
+                bootLauncher,
+                secureJarHandler,
+                asmCommons,
+                asmUtil,
+                asmAnalysis,
+                asmTree,
+                asm,
+                jarJar,
+                mavenArtifact
+              ].filter(p => p).join(cpSep);
+
+              options.customArgs.push(
+                `-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,maven-artifact,${versionId}.jar`,
+                `-DlibraryDirectory=${libDir}`,
+                '-p', modulePath,
+                '--add-modules', 'ALL-MODULE-PATH',
+                '--add-opens', 'java.base/java.util.jar=cpw.mods.securejarhandler',
+                '--add-opens', 'java.base/java.lang.invoke=cpw.mods.securejarhandler',
+                '--add-exports', 'java.base/sun.security.util=cpw.mods.securejarhandler',
+                '--add-exports', 'jdk.naming.dns/com.sun.jndi.dns=java.naming'
+              );
+              foundNeoArgs = true;
+              logToFile('[ARGS] Injected NeoForge specific args via customArgs');
+            }
+          }
+        } catch (e) { logToFile(`[ARGS-ERR] Failed to calculate NeoForge args: ${e}`); }
+
+        if (!foundNeoArgs) {
+          // Fallback to standard exports if we couldn't build the specific neo args
+          options.customArgs.push(
+            '--add-opens', 'java.base/java.util.jar=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.lang.invoke=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.io=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.nio=ALL-UNNAMED',
+            '--add-opens', 'java.base/sun.nio.ch=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.util.zip=ALL-UNNAMED'
+          );
+        }
+      }
       sendStatus('Launching...', 80);
       let auth = options.auth;
 
@@ -479,8 +895,8 @@ app.whenReady().then(() => {
       if (!auth || !auth.access_token || auth.access_token === '0') {
         auth = {
           access_token: '0',
-          client_token: crypto.randomUUID(),
-          uuid: crypto.randomUUID().replace(/-/g, ''),
+          client_token: randomUUID(),
+          uuid: randomUUID().replace(/-/g, ''),
           name: options.auth?.name || 'Player',
           user_properties: '{}'
         };
@@ -488,9 +904,12 @@ app.whenReady().then(() => {
 
       const opts: any = {
         authorization: auth,
+        javaPath: options.javaPath, // CRITICAL: Use managed Java path
         root: mcPath,
         version: { number: options.gameVersion, type: 'release' },
         memory: { max: options.memory || '4G', min: '2G' },
+        // Use the calculated customArgs which now includes NeoForge/Forge specific JVM args
+        customArgs: options.customArgs || [],
         overrides: {
           // CRITICAL: Explicit stdio configuration to ensure we capture output
           detached: false,
@@ -503,14 +922,31 @@ app.whenReady().then(() => {
         }
       };
 
+      // MCLC Event Listeners
+      launcher.on('debug', (e) => {
+        console.log(`[MCLC_DEBUG] ${e}`);
+        logToFile(`[DEBUG] ${e}`);
+      });
+      launcher.on('data', (e) => {
+        console.log(`[MCLC_DATA] ${e}`);
+        logToFile(`[DATA] ${e}`);
+      });
+      launcher.on('close', (e) => {
+        console.log(`[MCLC_CLOSE] ${e}`);
+        logToFile(`[CLOSE] Code: ${e}`);
+      });
+      launcher.on('arguments', (e) => {
+        logToFile(`[ARGS] ${JSON.stringify(e)}`);
+      });
+
       // Platform-specific adjustments for Windows
       if (process.platform === 'win32') {
         // Force javaw.exe (windowless) instead of java.exe
         // This prevents CMD window while still allowing log capture through pipes
-        const javaPath = opts.javaPath || process.env.JAVA_HOME;
-        if (javaPath && javaPath.includes('java.exe')) {
-          opts.javaPath = javaPath.replace('java.exe', 'javaw.exe');
-          _event.sender.send('launcher-log', `[INFO] Using javaw.exe for windowless execution`);
+        const currentJava = opts.javaPath || options.javaPath || process.env.JAVA_HOME;
+        if (currentJava && currentJava.includes('java.exe')) {
+          opts.javaPath = currentJava.replace('java.exe', 'javaw.exe');
+          _event.sender.send('launcher-log', `[INFO] Using javaw.exe: ${opts.javaPath}`);
         }
 
         // Ensure proper spawn options for Windows
@@ -547,57 +983,62 @@ app.whenReady().then(() => {
       _event.sender.send('launcher-log', '[INFO] Launching Minecraft...');
       const child = await launcher.launch(opts);
 
-      // Diagnostic: Log child process info
-      _event.sender.send('launcher-log', `[INFO] Java process spawned - PID: ${child.pid}`);
-      _event.sender.send('launcher-log', `[INFO] stdout available: ${!!child.stdout}`);
-      _event.sender.send('launcher-log', `[INFO] stderr available: ${!!child.stderr}`);
+      if (child) {
+        // Diagnostic: Log child process info
+        _event.sender.send('launcher-log', `[INFO] Java process spawned - PID: ${child.pid}`);
+        _event.sender.send('launcher-log', `[INFO] stdout available: ${!!child.stdout}`);
+        _event.sender.send('launcher-log', `[INFO] stderr available: ${!!child.stderr}`);
 
-      // CRITICAL: Explicitly capture stdout/stderr for Java logs
-      // This is the main way we get Minecraft's runtime logs
-      if (child.stdout) {
-        child.stdout.setEncoding('utf8');
-        child.stdout.on('data', (data: any) => {
-          const output = data.toString();
-          const logLines = output.split('\n').filter((line: string) => line.trim());
-          logLines.forEach((line: string) => {
-            _event.sender.send('launcher-log', `[JAVA] ${line}`);
+        if (child.stdout) {
+          child.stdout.setEncoding('utf8');
+          child.stdout.on('data', (data: any) => {
+            const output = data.toString();
+            const logLines = output.split('\n').filter((line: string) => line.trim());
+            logLines.forEach((line: string) => {
+              console.log(`[JAVA] ${line}`);
+              _event.sender.send('launcher-log', `[JAVA] ${line}`);
+            });
           });
+          child.stdout.on('error', (err) => {
+            _event.sender.send('launcher-log', `[ERROR] stdout error: ${err.message}`);
+          });
+          _event.sender.send('launcher-log', '[INFO] stdout stream listeners attached');
+        } else {
+          _event.sender.send('launcher-log', '[WARN] stdout not available for Java process');
+        }
+
+        if (child.stderr) {
+          child.stderr.setEncoding('utf8');
+          child.stderr.on('data', (data: any) => {
+            const output = data.toString();
+            const logLines = output.split('\n').filter((line: string) => line.trim());
+            logLines.forEach((line: string) => {
+              console.error(`[JAVA-ERR] ${line}`);
+              _event.sender.send('launcher-log', `[JAVA-ERR] ${line}`);
+            });
+          });
+          child.stderr.on('error', (err) => {
+            _event.sender.send('launcher-log', `[ERROR] stderr error: ${err.message}`);
+          });
+          _event.sender.send('launcher-log', '[INFO] stderr stream listeners attached');
+        } else {
+          _event.sender.send('launcher-log', '[WARN] stderr not available for Java process');
+        }
+
+        // Additional logging for process events
+        child.on('error', (err) => {
+          _event.sender.send('launcher-log', `[ERROR] Child process error: ${err.message}`);
         });
-        child.stdout.on('error', (err) => {
-          _event.sender.send('launcher-log', `[ERROR] stdout error: ${err.message}`);
+
+        child.on('exit', (code, signal) => {
+          _event.sender.send('launcher-log', `[INFO] Process exited - code: ${code}, signal: ${signal}`);
         });
-        _event.sender.send('launcher-log', '[INFO] stdout stream listeners attached');
+
+        runningInstances.set(safeName, child);
       } else {
-        _event.sender.send('launcher-log', '[WARN] stdout not available for Java process');
+        _event.sender.send('launcher-log', `[ERROR] Launcher failed to spawn process. Check version path or Java compatibility.`);
       }
 
-      if (child.stderr) {
-        child.stderr.setEncoding('utf8');
-        child.stderr.on('data', (data: any) => {
-          const output = data.toString();
-          const logLines = output.split('\n').filter((line: string) => line.trim());
-          logLines.forEach((line: string) => {
-            _event.sender.send('launcher-log', `[JAVA-ERR] ${line}`);
-          });
-        });
-        child.stderr.on('error', (err) => {
-          _event.sender.send('launcher-log', `[ERROR] stderr error: ${err.message}`);
-        });
-        _event.sender.send('launcher-log', '[INFO] stderr stream listeners attached');
-      } else {
-        _event.sender.send('launcher-log', '[WARN] stderr not available for Java process');
-      }
-
-      // Additional logging for process events
-      child.on('error', (err) => {
-        _event.sender.send('launcher-log', `[ERROR] Child process error: ${err.message}`);
-      });
-
-      child.on('exit', (code, signal) => {
-        _event.sender.send('launcher-log', `[INFO] Process exited - code: ${code}, signal: ${signal}`);
-      });
-
-      runningInstances.set(safeName, child);
       return { success: true };
     } catch (err: any) {
       return sendError(err.message);
@@ -681,9 +1122,48 @@ app.whenReady().then(() => {
 
     if (fs.existsSync(mDir)) {
       const files = fs.readdirSync(mDir);
-      return files.filter(f => f.endsWith('.jar') || f.endsWith('.zip'));
+      // Include both enabled (.jar/.zip) and disabled (.jar.disabled/.zip.disabled) files
+      return files.filter(f =>
+        f.endsWith('.jar') ||
+        f.endsWith('.zip') ||
+        f.endsWith('.jar.disabled') ||
+        f.endsWith('.zip.disabled')
+      );
     }
     return [];
+  });
+
+  // Toggle mod file between enabled and disabled states
+  ipcMain.handle('toggle-mod-file', async (_event, { rootPath, modpackName, filename, enabled }) => {
+    const fs = require('fs');
+    const path = require('path');
+    const sName = modpackName.replace(/[^a-zA-Z0-9-]/g, '_');
+    const modsDir = path.join(rootPath || 'C:\\Minecraft', 'instances', sName, 'mods');
+
+    try {
+      const isCurrentlyDisabled = filename.endsWith('.disabled');
+      const baseName = isCurrentlyDisabled ? filename.replace('.disabled', '') : filename;
+
+      const enabledPath = path.join(modsDir, baseName);
+      const disabledPath = path.join(modsDir, baseName + '.disabled');
+
+      if (enabled && fs.existsSync(disabledPath)) {
+        // Enable: rename .jar.disabled to .jar
+        fs.renameSync(disabledPath, enabledPath);
+        console.log(`[MODS] Enabled: ${baseName}`);
+        return { success: true, newFilename: baseName };
+      } else if (!enabled && fs.existsSync(enabledPath)) {
+        // Disable: rename .jar to .jar.disabled
+        fs.renameSync(enabledPath, disabledPath);
+        console.log(`[MODS] Disabled: ${baseName}`);
+        return { success: true, newFilename: baseName + '.disabled' };
+      }
+
+      return { success: false, error: 'File not found' };
+    } catch (err: any) {
+      console.error('[MODS] Toggle failed:', err);
+      return { success: false, error: err.message };
+    }
   });
 
   // IPC Handlers for Updates

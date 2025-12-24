@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Plus, X, Loader2, FolderPlus, ChevronDown } from 'lucide-react';
+import { Package, Plus, X, Loader2, FolderPlus, ChevronDown, AlertTriangle } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
 
 interface ModpackSelectorDialogProps {
@@ -24,9 +24,55 @@ export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVer
     const [modVersions, setModVersions] = useState<any[]>([]);
     const [selectedModVersion, setSelectedModVersion] = useState<string | null>(null);
     const [loadingVersions, setLoadingVersions] = useState(false);
+    const [compatibilityWarning, setCompatibilityWarning] = useState<string | null>(null);
+    const [modSupportedLoaders, setModSupportedLoaders] = useState<string[]>([]);
 
     const availableGameVersions = ['1.21.1', '1.21', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.19.2', '1.18.2', '1.17.1', '1.16.5'];
     const availableLoaders = ['Fabric', 'Forge', 'Quilt', 'NeoForge'];
+
+    // Auto-detect loader and game version from mod's metadata
+    useEffect(() => {
+        const detectLoaderAndVersion = async () => {
+            try {
+                // Fetch all versions for the mod to determine supported loaders
+                const response = await axios.get(
+                    `https://api.modrinth.com/v2/project/${mod.project_id || mod.slug}/version`,
+                    { headers: { 'User-Agent': 'NovaLink/1.0.22' } }
+                );
+
+                if (response.data && response.data.length > 0) {
+                    // Get all unique loaders supported by this mod
+                    const allLoaders = new Set<string>();
+                    const allGameVersions = new Set<string>();
+
+                    response.data.forEach((v: any) => {
+                        v.loaders?.forEach((l: string) => allLoaders.add(l.toLowerCase()));
+                        v.game_versions?.forEach((gv: string) => allGameVersions.add(gv));
+                    });
+
+                    setModSupportedLoaders(Array.from(allLoaders));
+
+                    // Auto-select best loader (prefer Fabric > NeoForge > Forge > Quilt)
+                    const loaderPriority = ['fabric', 'neoforge', 'forge', 'quilt'];
+                    const bestLoader = loaderPriority.find(l => allLoaders.has(l));
+                    if (bestLoader && bestLoader !== loader.toLowerCase()) {
+                        const formattedLoader = bestLoader.charAt(0).toUpperCase() + bestLoader.slice(1);
+                        setLoader(formattedLoader);
+                    }
+
+                    // Auto-select best game version (newest in our available list)
+                    const bestVersion = availableGameVersions.find(v => allGameVersions.has(v));
+                    if (bestVersion && bestVersion !== gameVersion) {
+                        setGameVersion(bestVersion);
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to auto-detect loader:', err);
+            }
+        };
+
+        detectLoaderAndVersion();
+    }, [mod.project_id, mod.slug]);
 
     useEffect(() => {
         fetchModpacks();
@@ -67,16 +113,19 @@ export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVer
                 `https://api.modrinth.com/v2/project/${mod.project_id || mod.slug}/version`,
                 {
                     params: {
-                        game_versions: JSON.stringify([gameVersion]),
-                        loaders: JSON.stringify([loader.toLowerCase()])
+                        ...(gameVersion !== 'Any' && { game_versions: gameVersion }),
+                        ...(loader !== 'Any' && { loaders: loader.toLowerCase() })
                     },
-                    headers: { 'User-Agent': 'NovaLink/1.0.19' }
+                    headers: { 'User-Agent': 'NovaLink/1.0.0' }
                 }
             );
 
-            setModVersions(response.data || []);
-            if (response.data && response.data.length > 0) {
-                setSelectedModVersion(response.data[0].id);
+            const sortedVersions = (response.data || []).sort((a: any, b: any) =>
+                new Date(b.date_published).getTime() - new Date(a.date_published).getTime()
+            );
+            setModVersions(sortedVersions);
+            if (sortedVersions.length > 0) {
+                setSelectedModVersion(sortedVersions[0].id);
             }
         } catch (err) {
             console.error('Failed to fetch mod versions:', err);
@@ -218,16 +267,35 @@ export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVer
                                     <div className="relative">
                                         <select
                                             value={loader}
-                                            onChange={(e) => setLoader(e.target.value)}
+                                            onChange={(e) => {
+                                                setLoader(e.target.value);
+                                                // Check compatibility
+                                                if (modSupportedLoaders.length > 0 && !modSupportedLoaders.includes(e.target.value.toLowerCase())) {
+                                                    setCompatibilityWarning(`This mod may not support ${e.target.value}. Supported: ${modSupportedLoaders.join(', ')}`);
+                                                } else {
+                                                    setCompatibilityWarning(null);
+                                                }
+                                            }}
                                             className="w-full appearance-none bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 pr-10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
-                                            {availableLoaders.map(l => (
+                                            {availableLoaders.filter(l =>
+                                                modSupportedLoaders.length === 0 ||
+                                                modSupportedLoaders.includes(l.toLowerCase())
+                                            ).map(l => (
                                                 <option key={l} value={l}>{l}</option>
                                             ))}
                                         </select>
                                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 pointer-events-none" />
                                     </div>
                                 </div>
+
+                                {/* Compatibility Warning */}
+                                {compatibilityWarning && (
+                                    <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                                        <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                                        <p className="text-amber-400 text-sm font-medium">{compatibilityWarning}</p>
+                                    </div>
+                                )}
 
                                 {/* Mod Version Selector */}
                                 <div className="space-y-2">

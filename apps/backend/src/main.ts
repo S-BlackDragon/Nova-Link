@@ -2,6 +2,8 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { join } from 'path';
+import * as express from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -12,6 +14,8 @@ async function bootstrap() {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
   });
+
+  app.use('/uploads', express.static(join(__dirname, '..', 'uploads')));
 
   app.enableCors({
     origin: true,

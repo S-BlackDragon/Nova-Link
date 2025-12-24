@@ -291,7 +291,7 @@ export default function Register({ onRegisterSuccess, onSwitchToLogin }: Registe
                         </button>
                     </p>
                     <div className="pt-6 border-t border-white/5">
-                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.18</span>
+                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version {__APP_VERSION__}</span>
                     </div>
                 </div>
             </div>

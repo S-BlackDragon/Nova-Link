@@ -20,14 +20,17 @@ let ModrinthController = class ModrinthController {
     constructor(modrinthService) {
         this.modrinthService = modrinthService;
     }
-    search(query, gameVersion, loader, projectType) {
-        return this.modrinthService.searchMods(query, gameVersion, loader, projectType);
+    async search(query, gameVersion, loader, projectType = 'mod', offset = '0', limit = '100') {
+        return this.modrinthService.searchMods(query, gameVersion, loader, projectType, parseInt(offset), parseInt(limit));
     }
     getProject(id) {
         return this.modrinthService.getProject(id);
     }
     getVersions(id, gameVersion, loader) {
         return this.modrinthService.getProjectVersions(id, gameVersion, loader);
+    }
+    async getStatus() {
+        return this.modrinthService.checkStatus();
     }
 };
 exports.ModrinthController = ModrinthController;
@@ -37,9 +40,11 @@ __decorate([
     __param(1, (0, common_1.Query)('gameVersion')),
     __param(2, (0, common_1.Query)('loader')),
     __param(3, (0, common_1.Query)('projectType')),
+    __param(4, (0, common_1.Query)('offset')),
+    __param(5, (0, common_1.Query)('limit')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String, String, String, String, String, String]),
+    __metadata("design:returntype", Promise)
 ], ModrinthController.prototype, "search", null);
 __decorate([
     (0, common_1.Get)('project/:id'),
@@ -57,6 +62,12 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], ModrinthController.prototype, "getVersions", null);
+__decorate([
+    (0, common_1.Get)('status'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], ModrinthController.prototype, "getStatus", null);
 exports.ModrinthController = ModrinthController = __decorate([
     (0, common_1.Controller)('modrinth'),
     __metadata("design:paramtypes", [modrinth_service_1.ModrinthService])

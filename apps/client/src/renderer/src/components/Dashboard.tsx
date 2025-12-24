@@ -1,41 +1,43 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Users, Settings as SettingsIcon, LogOut, Plus, LayoutDashboard, Compass, Loader2, Play, Shield, Copy, Check, Trash2, ExternalLink, ChevronDown, Square } from 'lucide-react';
+import { Package, Users, Settings as SettingsIcon, LogOut, Plus, LayoutDashboard, Compass, Loader2, Play, Trash2, ChevronDown, Square, RefreshCw } from 'lucide-react';
 import NovaLinkIcon from './NovaLinkIcon';
 import { API_BASE_URL } from '../config/api';
 import ModSearch from './Modpacks/ModSearch';
-import GroupJoin from './Groups/GroupJoin';
-import GroupCreator from './Groups/GroupCreator';
+import { GroupManager } from './Groups'; // Use index import
 import ModpackCreator from './Modpacks/ModpackCreator';
-import GroupDetails from './Groups/GroupDetails';
 import ModpackDetails from './Modpacks/ModpackDetails';
 import ModpackSelector from './Modpacks/ModpackSelector';
 import Settings from './Settings';
+import { DeleteConfirmationModal } from './Modpacks/DeleteConfirmationModal';
+import UserProfile from './Auth/UserProfile';
 import { useLogs } from '../contexts/LogContext';
+import { useToast } from '../contexts/ToastContext';
 
 interface DashboardProps {
   user: any;
   onLogout: () => void;
+  onUserUpdate: (updatedUser: any) => void; // Added for user update
 }
 
-export default function Dashboard({ user, onLogout }: DashboardProps) {
+export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<'modpacks' | 'search' | 'groups' | 'settings'>('modpacks');
-  const [showJoinGroup, setShowJoinGroup] = useState(false);
-  const [showCreateGroup, setShowCreateGroup] = useState(false);
+
   const [showCreateModpack, setShowCreateModpack] = useState(false);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedModpackId, setSelectedModpackId] = useState<string | null>(null);
   const [selectedMod, setSelectedMod] = useState<any | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [modpacks, setModpacks] = useState<any[]>([]);
-  const [groups, setGroups] = useState<any[]>([]);
-  const [loadingModpacks, setLoadingModpacks] = useState(true);
-  const [loadingGroups, setLoadingGroups] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+
   const [installingModpack, setInstallingModpack] = useState<string | null>(null);
+  const [loadingModpacks, setLoadingModpacks] = useState(true);
+
   const [deletingModpack, setDeletingModpack] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'modpack' | 'group', id: string, name: string } | null>(null);
   const [msProfile, setMsProfile] = useState<{ name: string } | null>(null);
   const { setLaunchingInfo, launching: globalLaunching, isRunning, activePackId } = useLogs();
+  const toast = useToast();
 
   useEffect(() => {
     const handleNav = () => setActiveTab('settings');
@@ -60,36 +62,28 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     if (!user?.id) return;
     setLoadingModpacks(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/modpacks/user/${user.id}`);
-      setModpacks(Array.isArray(response.data) ? response.data : []);
-    } catch (err) {
-      console.error('Failed to fetch modpacks:', err);
+      const [authoredRes, sharedRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/modpacks/user/${user.id}`),
+        axios.get(`${API_BASE_URL}/modpacks/user/${user.id}/shared`)
+      ]);
+      const combined = [...(Array.isArray(authoredRes.data) ? authoredRes.data : []), ...(Array.isArray(sharedRes.data) ? sharedRes.data : [])];
+      const deduped = Array.from(new Map(combined.map(mp => [mp.id, mp])).values());
+      setModpacks(deduped);
+    } catch (err: any) {
+      console.error('Failed to fetch modpacks from bankend:', err);
+      const status = err.response?.status;
+      toast.error('Fetch Failed', `Connectivity error to ${API_BASE_URL} (${status || 'Offline'}).`);
     } finally {
       setLoadingModpacks(false);
     }
   };
 
-  const fetchGroups = async () => {
-    if (!user?.id) return;
-    setLoadingGroups(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/groups`, {
-        params: { userId: user.id }
-      });
-      setGroups(Array.isArray(response.data) ? response.data : []);
-    } catch (err) {
-      console.error('Failed to fetch groups:', err);
-    } finally {
-      setLoadingGroups(false);
-    }
-  };
-
   useEffect(() => {
-    if (activeTab === 'modpacks') {
-      fetchModpacks();
-    } else if (activeTab === 'groups') {
-      fetchGroups();
-    }
+    if (activeTab !== 'modpacks') return;
+
+    fetchModpacks();
+    const interval = setInterval(fetchModpacks, 30000); // Pulse refresh every 30s
+    return () => clearInterval(interval);
   }, [activeTab, user?.id]);
 
   const handleLaunch = async (e: React.MouseEvent, pack: any) => {
@@ -97,6 +91,44 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     try {
       const settingsStr = localStorage.getItem('mc_settings');
       const settings = settingsStr ? JSON.parse(settingsStr) : {};
+
+      // 1. Check if path is set
+      if (!settings.mcPath || settings.mcPath.trim() === '') {
+        toast.error('Path Not Set', 'Please set an installation path in Settings before playing.');
+        return;
+      }
+
+      // 2. Check authentication status
+      const storedAuth = localStorage.getItem('ms_auth');
+      const storedProfile = localStorage.getItem('ms_profile');
+
+      if (!settings.offlineMode && (!storedAuth || !storedProfile)) {
+        toast.error('Login Required', 'Please enable Offline Mode or sign in with Microsoft to play.');
+        return;
+      }
+
+      // 3. Build auth object based on mode
+      let auth: { access_token?: string; client_token?: string; uuid: string; name: string } = {
+        uuid: crypto.randomUUID().replace(/-/g, ''), // Valid 32-char hex UUID for offline
+        name: user?.username || 'Player'
+      };
+
+      // Use real Microsoft auth if not in offline mode
+      if (!settings.offlineMode && storedAuth && storedProfile) {
+        try {
+          const parsedAuth = JSON.parse(storedAuth);
+          const parsedProfile = JSON.parse(storedProfile);
+          auth = {
+            access_token: parsedAuth.access_token,
+            client_token: parsedAuth.client_token || crypto.randomUUID(),
+            uuid: parsedProfile.uuid || parsedProfile.id || crypto.randomUUID().replace(/-/g, ''),
+            name: parsedProfile.name || user?.username || 'Player'
+          };
+        } catch (parseErr) {
+          console.error('Failed to parse stored auth:', parseErr);
+          // Fall back to offline-style auth with valid UUID
+        }
+      }
 
       const options = {
         rootPath: settings.mcPath || 'C:\\Minecraft',
@@ -107,12 +139,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         loaderVersion: pack.versions?.[0]?.loaderVersion,
         versionId: pack.versions?.[0]?.id,
         memory: settings.maxMemory || '4G',
-        auth: {
-          access_token: 'dummy',
-          client_token: 'dummy',
-          uuid: 'dummy',
-          name: user?.username || 'Player'
-        }
+        auth,
+        token: localStorage.getItem('token')
       };
 
       console.log('Launching with options:', options);
@@ -172,7 +200,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         modpackName: mod.title,
         rootPath: mcPath,
         gameVersion: gameVersion,
-        loaderType: loader.toLowerCase()
+        loaderType: loader.toLowerCase(),
+        token: localStorage.getItem('token')
       });
 
       // 6. Switch to modpacks tab and refresh
@@ -181,22 +210,17 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
     } catch (err) {
       console.error('Failed to auto-install modpack:', err);
-      alert('Failed to install modpack. Please check console for details.');
+      toast.error('Install Failed', 'Failed to install modpack. Check console for details.');
     } finally {
       setInstallingModpack(null);
     }
   };
 
-  const handleDeleteModpack = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this modpack? This will verify delete all local files for this instance.')) return;
-
+  const executeDeleteModpack = async (id: string) => {
     setDeletingModpack(id);
     try {
-      // Find the modpack to get its name
       const pack = modpacks.find((p: any) => p.id === id);
       if (pack) {
-        // Delete local files
         const settingsStr = localStorage.getItem('mc_settings');
         const settings = settingsStr ? JSON.parse(settingsStr) : {};
         const rootPath = settings.mcPath || 'C:\\Minecraft';
@@ -208,27 +232,21 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         });
       }
 
-      // Delete from backend
       await axios.delete(`${API_BASE_URL}/modpacks/${id}`);
       fetchModpacks();
+      toast.success('Deleted', 'Modpack deleted successfully');
     } catch (err) {
       console.error('Failed to delete modpack:', err);
-      alert('Failed to delete modpack');
+      toast.error('Deletion Failed', 'Failed to delete modpack.');
     } finally {
       setDeletingModpack(null);
+      setDeleteConfirmation(null);
     }
   };
 
-  const handleDeleteGroup = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this group?')) return;
-    try {
-      await axios.delete(`${API_BASE_URL}/groups/${id}`);
-      fetchGroups();
-    } catch (err) {
-      console.error('Failed to delete group:', err);
-    }
-  };
+
+
+
 
   const handleCheckUpdate = async () => {
     if (checkingUpdate) return;
@@ -241,14 +259,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       });
       const cleanupNotAvailable = (window as any).api.updater.onUpdateNotAvailable(() => {
         setCheckingUpdate(false);
-        alert('You are on the latest version!');
+        toast.success('Up to Date', 'You are on the latest version!');
         cleanupAvailable();
         cleanupNotAvailable();
         cleanupError();
       });
       const cleanupError = (window as any).api.updater.onUpdateError((err: any) => {
         setCheckingUpdate(false);
-        alert('Update check failed: ' + (err.message || 'Unknown error'));
+        toast.error('Update Check Failed', err.message || 'Unknown error');
         cleanupAvailable();
         cleanupNotAvailable();
         cleanupError();
@@ -258,91 +276,99 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     } catch (err) {
       console.error('Failed to check for updates:', err);
       setCheckingUpdate(false);
+      toast.error('Update Check Failed', 'Could not communicate with update server.');
     }
   };
 
-  const copyToClipboard = (e: React.MouseEvent, text: string) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    setCopiedId(text);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
+
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-200 w-full font-sans">
       {/* Sidebar */}
-      <aside className="w-80 bg-slate-900/40 backdrop-blur-3xl border-r border-white/5 flex flex-col flex-shrink-0 z-20 relative">
-        <div className="p-10 flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-500/20">
-            <NovaLinkIcon className="text-white drop-shadow-lg" size={28} />
+      <aside className="w-20 lg:w-72 bg-slate-900/40 backdrop-blur-3xl border-r border-white/5 flex flex-col flex-shrink-0 z-20 relative transition-all duration-300">
+        <div className="p-6 lg:p-8 flex items-center gap-4 justify-center lg:justify-start">
+          <div className="w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-500/20 flex-shrink-0">
+            <NovaLinkIcon className="text-white drop-shadow-lg" size={24} />
           </div>
-          <span className="font-black text-2xl tracking-tighter text-white">Nova Link</span>
+          <span className="font-black text-xl lg:text-2xl tracking-tighter text-white hidden lg:block">Nova Link</span>
         </div>
 
-        <nav className="flex-1 px-6 py-4 space-y-2">
+        <nav className="flex-1 px-3 lg:px-4 py-4 space-y-2">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
                 setActiveTab(item.id as any);
                 setShowCreateModpack(false);
-                setShowJoinGroup(false);
-                setShowCreateGroup(false);
-                setSelectedGroupId(null);
                 setSelectedModpackId(null);
               }}
-              className={`w-full flex items-center gap-4 px-5 py-4 rounded-[1.25rem] transition-all duration-300 group ${activeTab === item.id
+              className={`w-full flex items-center gap-4 px-3 lg:px-5 py-4 rounded-xl lg:rounded-[1.25rem] transition-all duration-300 group justify-center lg:justify-start ${activeTab === item.id
                 ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20'
                 : 'text-slate-400 hover:bg-white/5 hover:text-white'
                 }`}
+              title={item.label}
             >
               <item.icon className={`w-6 h-6 transition-transform duration-300 ${activeTab === item.id ? 'scale-110' : 'group-hover:scale-110'}`} />
-              <span className="font-bold text-lg">{item.label}</span>
+              <span className="font-bold text-lg hidden lg:block">{item.label}</span>
             </button>
           ))}
         </nav>
 
-        <div className="p-8 mt-auto border-t border-white/5 bg-white/[0.02]">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-12 h-12 bg-gradient-to-br from-slate-700 to-slate-800 rounded-2xl flex items-center justify-center border border-white/10 shadow-lg">
-              <span className="text-white font-black text-xl">{user?.username?.[0]?.toUpperCase() || 'U'}</span>
+        <div className="p-4 lg:p-8 mt-auto border-t border-white/5 bg-white/[0.02]">
+          {/* Check for Updates Button */}
+          <div className="mb-4">
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              className={`w-full flex items-center justify-center gap-3 px-3 lg:px-5 py-4 rounded-xl lg:rounded-[1.25rem] font-bold transition-all duration-300 border border-transparent hover:border-emerald-500/20 hover:bg-emerald-500/10 ${checkingUpdate ? 'opacity-50 text-slate-500' : 'text-slate-400 hover:text-emerald-400'}`}
+              title="Check for Updates"
+            >
+              {checkingUpdate ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+              <span className="hidden lg:block">{checkingUpdate ? 'Checking...' : 'Check Updates'}</span>
+            </button>
+          </div>
+
+          <div
+            onClick={() => setIsProfileOpen(true)}
+            className="flex items-center gap-4 mb-6 justify-center lg:justify-start cursor-pointer group/user p-2 -m-2 rounded-2xl hover:bg-white/5 transition-colors"
+            title="View Profile"
+          >
+            <div className="w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-slate-700 to-slate-800 rounded-xl lg:rounded-2xl flex items-center justify-center border border-white/10 shadow-lg flex-shrink-0 overflow-hidden group-hover/user:border-indigo-500/50 transition-colors">
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white font-black text-lg lg:text-xl">{user?.username?.[0]?.toUpperCase() || 'U'}</span>
+              )}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-bold truncate text-lg">{user?.username || 'User'}</p>
+            <div className="flex-1 min-w-0 hidden lg:block">
+              <p className="text-white font-bold truncate text-lg group-hover/user:text-indigo-400 transition-colors">{user?.username || 'User'}</p>
               <p className="text-slate-500 text-sm truncate font-medium">{user?.email || 'user@example.com'}</p>
             </div>
           </div>
           <button
             onClick={onLogout}
-            className="w-full flex items-center justify-center gap-3 px-5 py-4 rounded-[1.25rem] text-red-400 font-bold hover:bg-red-500/10 transition-all duration-300 border border-transparent hover:border-red-500/20"
+            className="w-full flex items-center justify-center gap-3 px-3 lg:px-5 py-4 rounded-xl lg:rounded-[1.25rem] text-red-400 font-bold hover:bg-red-500/10 transition-all duration-300 border border-transparent hover:border-red-500/20"
+            title="Sign Out"
           >
             <LogOut className="w-5 h-5" />
-            <span>Sign Out</span>
+            <span className="hidden lg:block">Sign Out</span>
           </button>
 
           {/* Microsoft Account Status */}
-          <div className={`mt-4 flex items-center justify-center gap-2 text-xs font-bold ${msProfile ? 'text-emerald-400' : 'text-slate-500'}`}>
-            <div className={`w-2 h-2 rounded-full ${msProfile ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+          <div className={`mt-4 items-center justify-center gap-2 text-[10px] font-bold hidden lg:flex ${msProfile ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             {msProfile ? `Xbox: ${msProfile.name}` : 'Xbox: Not Connected'}
           </div>
 
-          <div className="mt-3 text-center space-y-2">
-            <span className="block text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version 1.0.21</span>
-            <button
-              onClick={handleCheckUpdate}
-              disabled={checkingUpdate}
-              className="text-[10px] font-bold text-slate-500 hover:text-emerald-500 transition-colors flex items-center justify-center gap-1 mx-auto disabled:opacity-50"
-            >
-              {checkingUpdate ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-              {checkingUpdate ? 'Checking...' : 'Check for Updates'}
-            </button>
+          <div className="mt-4 text-center hidden lg:block">
+            <span className="block text-[10px] font-black text-slate-700 uppercase tracking-[0.2em]">Version {__APP_VERSION__}</span>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-slate-900/20 flex flex-col">
-        <div key={activeTab} className="w-full px-12 py-16 lg:px-20 max-w-[1600px] mx-auto">
+        <div key={activeTab} className="w-full px-6 py-8 md:px-12 lg:px-20 max-w-[1800px] mx-auto transition-all duration-500">
           {activeTab === 'modpacks' && (
             <div>
               {showCreateModpack ? (
@@ -356,14 +382,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                 />
               ) : (
                 <>
-                  <div className="flex items-center justify-between mb-16">
-                    <div>
-                      <h1 className="text-5xl font-black text-white mb-4 tracking-tight">My Modpacks</h1>
-                      <p className="text-slate-400 text-xl font-medium">Manage and launch your custom Minecraft experiences.</p>
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12 md:mb-16">
+                    <div className="text-center md:text-left">
+                      <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight">My Modpacks</h1>
+                      <p className="text-slate-400 text-lg md:text-xl font-medium">Manage and launch your custom Minecraft experiences.</p>
                     </div>
                     <button
                       onClick={() => setShowCreateModpack(true)}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-[0.97]"
+                      className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center justify-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-[0.97]"
                     >
                       <Plus className="w-6 h-6" />
                       <span className="text-lg">New Modpack</span>
@@ -376,17 +402,20 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                       <p className="text-slate-500 font-bold">Loading your modpacks...</p>
                     </div>
                   ) : modpacks.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-10">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
                       {modpacks.map((pack) => (
                         <div
                           key={pack.id}
                           onClick={() => setSelectedModpackId(pack.id)}
-                          className="bg-white/[0.02] border border-white/5 rounded-[2.5rem] p-10 hover:border-indigo-500/30 hover:bg-white/[0.04] transition-all duration-500 group flex flex-col relative overflow-hidden cursor-pointer"
+                          className="bg-white/[0.02] border border-white/5 rounded-[2.5rem] p-8 md:p-10 hover:border-indigo-500/30 hover:bg-white/[0.04] transition-all duration-500 group flex flex-col relative overflow-hidden cursor-pointer"
                         >
                           <button
-                            onClick={(e) => handleDeleteModpack(e, pack.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name });
+                            }}
                             disabled={deletingModpack === pack.id}
-                            className="absolute top-6 right-6 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg disabled:opacity-70"
+                            className="absolute top-4 right-4 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg disabled:opacity-70"
                           >
                             {deletingModpack === pack.id ? (
                               <Loader2 className="w-5 h-5 animate-spin" />
@@ -399,7 +428,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                             <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center shadow-inner">
                               <Package className="w-10 h-10 text-indigo-500" />
                             </div>
-                            <div className="flex flex-col items-end gap-1">
+                            <div className="flex flex-col items-end gap-1 mr-12">
                               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Version</span>
                               <span className="text-white font-black text-xl">{pack.versions?.[0]?.versionNumber || '1.0.0'}</span>
                             </div>
@@ -484,7 +513,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           {activeTab === 'search' && (
             <div>
               <ModSearch
-                key={`search-${activeTab}-${modpacks.length}`}
+                key={`search-${activeTab}`}
                 onAddMod={(mod) => {
                   setSelectedMod(mod);
                 }}
@@ -495,112 +524,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           )}
 
           {activeTab === 'groups' && (
-            <div>
-              {showJoinGroup ? (
-                <GroupJoin
-                  userId={user?.id}
-                  onJoined={() => {
-                    setShowJoinGroup(false);
-                    fetchGroups();
-                  }}
-                  onCancel={() => setShowJoinGroup(false)}
-                />
-              ) : showCreateGroup ? (
-                <GroupCreator
-                  userId={user?.id}
-                  onCreated={() => {
-                    setShowCreateGroup(false);
-                    fetchGroups();
-                  }}
-                  onCancel={() => setShowCreateGroup(false)}
-                />
-              ) : (
-                <>
-                  <div className="flex items-center justify-between mb-16">
-                    <div>
-                      <h1 className="text-5xl font-black text-white mb-4 tracking-tight">Groups</h1>
-                      <p className="text-slate-400 text-xl font-medium">Collaborate on modpacks with your team.</p>
-                    </div>
-                    <div className="flex gap-4">
-                      <button
-                        onClick={() => setShowJoinGroup(true)}
-                        className="bg-slate-800 hover:bg-slate-700 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center gap-3 shadow-xl active:scale-[0.97]"
-                      >
-                        <Users className="w-6 h-6" />
-                        <span className="text-lg">Join Group</span>
-                      </button>
-                      <button
-                        onClick={() => setShowCreateGroup(true)}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-[0.97]"
-                      >
-                        <Plus className="w-6 h-6" />
-                        <span className="text-lg">Create Group</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {loadingGroups ? (
-                    <div className="flex flex-col items-center justify-center py-32">
-                      <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-                      <p className="text-slate-500 font-bold">Loading your groups...</p>
-                    </div>
-                  ) : groups.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-10">
-                      {groups.map((group) => (
-                        <div
-                          key={group.id}
-                          onClick={() => setSelectedGroupId(group.id)}
-                          className="bg-white/[0.02] border border-white/5 rounded-[2.5rem] p-8 hover:border-indigo-500/30 hover:bg-white/[0.04] transition-all duration-500 group flex flex-col relative overflow-hidden cursor-pointer"
-                        >
-                          <button
-                            onClick={(e) => handleDeleteGroup(e, group.id)}
-                            className="absolute top-4 right-4 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                          <div className="flex items-start justify-between mb-8">
-                            <div className="w-16 h-16 bg-indigo-600/20 rounded-2xl flex items-center justify-center shadow-inner flex-shrink-0">
-                              <Shield className="w-8 h-8 text-indigo-500" />
-                            </div>
-                            <div className="flex flex-col items-end gap-2">
-                              <button
-                                onClick={(e) => copyToClipboard(e, group.inviteCode)}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-xl text-[10px] font-black text-slate-400 hover:text-white transition-colors border border-white/5 max-w-[140px]"
-                              >
-                                {copiedId === group.inviteCode ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                                <span className="truncate">{group.inviteCode}</span>
-                              </button>
-                              <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest mr-1">Invite Code</span>
-                            </div>
-                          </div>
-                          <h3 className="text-2xl font-black text-white mb-3 group-hover:text-indigo-400 transition-colors">{group.name}</h3>
-                          <p className="text-slate-400 font-medium mb-8">
-                            {group.members?.length || 0} Members • {group.targetModpack?.name || 'No target pack'}
-                          </p>
-
-                          <div className="mt-auto pt-8 border-t border-white/5 flex items-center justify-between">
-                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Active Pack</span>
-                            <div className="flex items-center gap-2 text-indigo-400">
-                              <span className="text-sm font-bold">{group.targetModpack?.name || 'None'}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-32 text-center bg-white/[0.02] border border-white/5 rounded-[3rem] backdrop-blur-sm">
-                      <div className="w-28 h-28 bg-slate-800/40 rounded-[2.5rem] flex items-center justify-center mb-10 border border-white/5 shadow-inner">
-                        <Users className="w-14 h-14 text-slate-500" />
-                      </div>
-                      <h2 className="text-3xl font-black text-white mb-4">No groups yet</h2>
-                      <p className="text-slate-400 max-w-md text-xl leading-relaxed font-medium">
-                        Join an existing group with an invite code or create your own to start collaborating.
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
+            <div className="h-full">
+              <GroupManager />
             </div>
           )}
 
@@ -613,16 +538,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       </main>
 
       {/* Modals */}
-      {selectedGroupId && (
-        <GroupDetails
-          groupId={selectedGroupId}
-          userId={user?.id}
-          onClose={() => {
-            setSelectedGroupId(null);
-            fetchGroups();
-          }}
-        />
-      )}
+
 
       {selectedModpackId && (
         <ModpackDetails
@@ -646,15 +562,26 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         />
       )}
 
-      {selectedModpackId && (
-        <ModpackDetails
-          modpackId={selectedModpackId}
-          onClose={() => {
-            setSelectedModpackId(null);
-            fetchModpacks();
-          }}
-        />
-      )}
+      <UserProfile
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        user={user}
+        onUpdate={(updatedUser) => {
+          onUserUpdate(updatedUser);
+        }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteConfirmation}
+        title={`Delete ${deleteConfirmation?.type === 'modpack' ? 'Modpack' : 'Group'}?`}
+        description={`Are you sure you want to delete "${deleteConfirmation?.name}"? ${deleteConfirmation?.type === 'modpack' ? 'This will permanently remove all local files.' : ''}`}
+        type="danger"
+        onClose={() => setDeleteConfirmation(null)}
+        onConfirm={() => {
+          if (deleteConfirmation?.type === 'modpack') executeDeleteModpack(deleteConfirmation.id);
+        }}
+      />
 
       {/* Global Progress Indicator */}
       {(globalLaunching || (useLogs().progress > 0 && useLogs().progress < 100)) && (

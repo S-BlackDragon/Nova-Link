@@ -3,7 +3,7 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { X, Download, ExternalLink, Calendar, User, DownloadCloud, Info, History, Image as ImageIcon, Layers, Loader2, Check, Tag, Link as LinkIcon, FileText, Globe, AlertCircle } from 'lucide-react';
+import { X, Download, ExternalLink, Calendar, User, DownloadCloud, Info, History, Image as ImageIcon, Layers, Loader2, Check, Tag, Link as LinkIcon, FileText, Globe, AlertCircle, ChevronDown } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
 
 interface ModDetailsModalProps {
@@ -20,25 +20,21 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
     const [project, setProject] = useState<any>(null);
     const [versions, setVersions] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingVersions, setLoadingVersions] = useState(false);
     const [selectedVersion, setSelectedVersion] = useState<any>(null);
     const [activeTab, setActiveTab] = useState<Tab>('overview');
     const [adding, setAdding] = useState(false);
 
+    const [internalGameVersion, setInternalGameVersion] = useState(gameVersion || 'Any');
+    const [internalLoader, setInternalLoader] = useState(loader || 'Any');
+
+    // Fetch project details once
     useEffect(() => {
         const fetchDetails = async () => {
             setLoading(true);
             try {
-                const [projRes, versRes] = await Promise.all([
-                    axios.get(`${API_BASE_URL}/modrinth/project/${projectId}`),
-                    axios.get(`${API_BASE_URL}/modrinth/project/${projectId}/versions`, {
-                        params: { gameVersion, loader }
-                    })
-                ]);
+                const projRes = await axios.get(`${API_BASE_URL}/modrinth/project/${projectId}`);
                 setProject(projRes.data);
-                setVersions(versRes.data);
-                if (versRes.data.length > 0) {
-                    setSelectedVersion(versRes.data[0]);
-                }
             } catch (err) {
                 console.error('Failed to fetch mod details:', err);
             } finally {
@@ -46,7 +42,41 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
             }
         };
         fetchDetails();
-    }, [projectId, gameVersion, loader]);
+    }, [projectId]);
+
+    // Fetch versions when internal filters change
+    useEffect(() => {
+        const fetchVersions = async () => {
+            setLoadingVersions(true);
+            try {
+                const versRes = await axios.get(`${API_BASE_URL}/modrinth/project/${projectId}/versions`, {
+                    params: {
+                        gameVersion: internalGameVersion === 'Any' ? undefined : internalGameVersion,
+                        loader: internalLoader === 'Any' ? undefined : internalLoader
+                    }
+                });
+                const sortedVersions = versRes.data.sort((a: any, b: any) =>
+                    new Date(b.date_published).getTime() - new Date(a.date_published).getTime()
+                );
+                setVersions(sortedVersions);
+                if (sortedVersions.length > 0) {
+                    setSelectedVersion(sortedVersions[0]);
+                } else {
+                    setSelectedVersion(null);
+                }
+            } catch (err) {
+                console.error('Failed to fetch mod versions:', err);
+                setVersions([]);
+                setSelectedVersion(null);
+            } finally {
+                setLoadingVersions(false);
+            }
+        };
+
+        if (projectId) {
+            fetchVersions();
+        }
+    }, [projectId, internalGameVersion, internalLoader]);
 
     const handleAdd = async (v: any) => {
         if (!onAddMod) return;
@@ -187,50 +217,108 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
 
                         {activeTab === 'versions' && (
                             <div className="space-y-4">
-                                <div className="flex items-center justify-between mb-8 items-end">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 bg-white/[0.02] p-8 rounded-[2.5rem] border border-white/5">
                                     <div>
-                                        <h3 className="text-2xl font-black text-white mb-2">Available Versions</h3>
-                                        <p className="text-slate-500 font-bold">Showing versions compatible with yours</p>
+                                        <h3 className="text-2xl font-black text-white mb-1">Available Versions</h3>
+                                        <p className="text-slate-500 font-bold text-sm">Showing versions compatible with your selection</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-4">
+                                        {/* Game Version Filter */}
+                                        <div className="flex flex-col gap-2">
+                                            <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Game Version</label>
+                                            <div className="relative">
+                                                <select
+                                                    value={internalGameVersion}
+                                                    onChange={(e) => setInternalGameVersion(e.target.value)}
+                                                    className="bg-slate-950/50 border border-white/10 text-white text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500/50 transition-all min-w-[140px] appearance-none cursor-pointer hover:border-white/20"
+                                                >
+                                                    <option value="Any">Any Version</option>
+                                                    {[...(project.game_versions || [])].reverse().map((gv: string) => (
+                                                        <option key={gv} value={gv}>{gv}</option>
+                                                    ))}
+                                                </select>
+                                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                                            </div>
+                                        </div>
+
+                                        {/* Loader Filter */}
+                                        <div className="flex flex-col gap-2">
+                                            <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Mod Loader</label>
+                                            <div className="relative">
+                                                <select
+                                                    value={internalLoader}
+                                                    onChange={(e) => setInternalLoader(e.target.value)}
+                                                    className="bg-slate-950/50 border border-white/10 text-white text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500/50 transition-all min-w-[140px] appearance-none cursor-pointer hover:border-white/20"
+                                                >
+                                                    <option value="Any">Any Loader</option>
+                                                    {[...(project.loaders || [])].sort().map((l: string) => (
+                                                        <option key={l} value={l} className="capitalize">
+                                                            {l.charAt(0).toUpperCase() + l.slice(1)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                                {versions.length > 0 ? versions.map((v: any) => (
-                                    <div
-                                        key={v.id}
-                                        className={`p-6 rounded-[2rem] border transition-all group flex items-center justify-between ${selectedVersion?.id === v.id ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/[0.02] border-white/5 hover:bg-white/5 hover:border-white/10'}`}
-                                    >
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-3 mb-1">
-                                                <h4 className="text-xl font-black text-white">{v.name}</h4>
-                                                <span className="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                                                    {v.version_number}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-4 text-sm text-slate-500 font-bold">
-                                                <span className="flex items-center gap-1"><Layers className="w-4 h-4" /> {v.game_versions.join(', ')}</span>
-                                                <span className="flex items-center gap-1"><Download className="w-4 h-4 text-emerald-500" /> {v.loaders.join(', ')}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={() => setSelectedVersion(v)}
-                                                className={`px-6 py-3 rounded-2xl font-black text-sm transition-all ${selectedVersion?.id === v.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                                            >
-                                                {selectedVersion?.id === v.id ? <Check className="w-5 h-5" /> : 'Select'}
-                                            </button>
-                                            <a
-                                                href={`https://modrinth.com/mod/${project.slug}/version/${v.id}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="p-3 bg-white/5 text-slate-500 rounded-2xl hover:text-white hover:bg-white/10 transition-all shadow-xl"
-                                            >
-                                                <ExternalLink className="w-5 h-5" />
-                                            </a>
-                                        </div>
+
+                                {loadingVersions ? (
+                                    <div className="flex flex-col items-center py-32 bg-white/[0.01] rounded-[3rem] border border-dashed border-white/5">
+                                        <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-6" />
+                                        <p className="text-slate-500 font-bold text-2xl animate-pulse">Fetching compatible versions...</p>
                                     </div>
-                                )) : (
+                                ) : versions.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {versions.map((v: any) => (
+                                            <div
+                                                key={v.id}
+                                                className={`p-6 rounded-[2rem] border transition-all group flex items-center justify-between ${selectedVersion?.id === v.id ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/[0.02] border-white/5 hover:bg-white/5 hover:border-white/10'}`}
+                                            >
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-3 mb-1">
+                                                        <h4 className="text-xl font-black text-white">{v.name}</h4>
+                                                        <span className="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                                                            {v.version_number}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-4 text-sm text-slate-500 font-bold">
+                                                        <span className="flex items-center gap-1"><Layers className="w-4 h-4" /> {v.game_versions.join(', ')}</span>
+                                                        <span className="flex items-center gap-1"><Download className="w-4 h-4 text-emerald-500" /> {v.loaders.join(', ')}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <button
+                                                        onClick={() => setSelectedVersion(v)}
+                                                        className={`px-6 py-3 rounded-2xl font-black text-sm transition-all ${selectedVersion?.id === v.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                                                    >
+                                                        {selectedVersion?.id === v.id ? <Check className="w-5 h-5" /> : 'Select'}
+                                                    </button>
+                                                    <a
+                                                        href={`https://modrinth.com/mod/${project.slug}/version/${v.id}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="p-3 bg-white/5 text-slate-500 rounded-2xl hover:text-white hover:bg-white/10 transition-all shadow-xl"
+                                                    >
+                                                        <ExternalLink className="w-5 h-5" />
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
                                     <div className="text-center py-24 bg-white/[0.01] rounded-[3rem] border border-dashed border-white/10">
                                         <DownloadCloud className="w-20 h-20 text-slate-800 mx-auto mb-6" />
                                         <p className="text-slate-500 font-bold text-2xl">No compatible versions found.</p>
+                                        <button
+                                            onClick={() => {
+                                                setInternalGameVersion('Any');
+                                                setInternalLoader('Any');
+                                            }}
+                                            className="mt-6 text-emerald-500 font-black uppercase tracking-widest text-xs hover:underline"
+                                        >
+                                            Reset Filters
+                                        </button>
                                     </div>
                                 )}
                             </div>

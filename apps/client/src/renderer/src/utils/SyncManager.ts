@@ -23,7 +23,9 @@ export class SyncManager {
     private static readonly API_BASE = API_BASE_URL;
 
     static async getManifest(versionId: string): Promise<Manifest> {
-        const response = await axios.get(`${this.API_BASE}/modpacks/versions/${versionId}/manifest`);
+        const token = localStorage.getItem('token');
+        const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+        const response = await axios.get(`${this.API_BASE}/sync/manifest/${versionId}`, config);
         return response.data;
     }
 

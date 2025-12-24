@@ -1,10 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 import { ModpacksService } from './modpacks.service';
 import { CreateModpackDto } from './dto/create-modpack.dto';
 import { UpdateModpackDto } from './dto/update-modpack.dto';
 import { PublishVersionDto } from './dto/publish-version.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('modpacks')
+@UseGuards(JwtAuthGuard)
 export class ModpacksController {
   constructor(private readonly modpacksService: ModpacksService) { }
 
@@ -18,10 +20,6 @@ export class ModpacksController {
     return this.modpacksService.publishVersion(id, publishVersionDto);
   }
 
-  @Get('versions/:versionId/manifest')
-  getManifest(@Param('versionId') versionId: string) {
-    return this.modpacksService.getManifest(versionId);
-  }
 
   @Post('versions/:versionId/mods')
   addMod(@Param('versionId') versionId: string, @Body() modData: any) {
@@ -46,6 +44,11 @@ export class ModpacksController {
   @Get('user/:userId')
   findByUser(@Param('userId') userId: string) {
     return this.modpacksService.findByUser(userId);
+  }
+
+  @Get('user/:userId/shared')
+  findSharedByUser(@Param('userId') userId: string) {
+    return this.modpacksService.findSharedByUser(userId);
   }
 
   @Get(':id')

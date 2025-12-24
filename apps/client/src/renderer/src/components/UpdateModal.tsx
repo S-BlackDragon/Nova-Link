@@ -1,29 +1,22 @@
+import { useEffect } from 'react'
 import { useUpdater } from '../hooks/useUpdater'
-import { Download, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react'
+import { useToast } from '../contexts/ToastContext'
+import { Download, RefreshCw, CheckCircle } from 'lucide-react'
 
 export default function UpdateModal() {
     const { status, version, progress, error, installNow, dismissUpdate } = useUpdater()
+    const toast = useToast()
 
-    // Don't show modal for idle, checking, available, or not-available states
-    if (status === 'idle' || status === 'checking' || status === 'available' || status === 'not-available') {
+    // Handle errors with toast
+    useEffect(() => {
+        if (status === 'error' && error) {
+            toast.error('Update Error', error)
+        }
+    }, [status, error, toast])
+
+    // Don't show modal for idle, checking, available, or not-available states, or error (handled by toast)
+    if (status === 'idle' || status === 'checking' || status === 'available' || status === 'not-available' || status === 'error') {
         return null
-    }
-
-    // Error toast notification
-    if (status === 'error') {
-        return (
-            <div className="fixed top-4 right-4 z-[9999] animate-in slide-in-from-top duration-300">
-                <div className="bg-red-500/10 backdrop-blur-xl border border-red-500/30 rounded-2xl p-4 shadow-2xl max-w-md">
-                    <div className="flex items-start gap-3">
-                        <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                            <h3 className="text-white font-bold text-sm mb-1">Update Error</h3>
-                            <p className="text-red-300 text-xs">{error || 'Failed to check for updates'}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )
     }
 
     // Downloading state

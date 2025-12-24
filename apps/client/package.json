@@ -1,6 +1,6 @@
 {
   "name": "nova-link",
-  "version": "1.0.21",
+  "version": "1.0.64",
   "description": "Nova Link - Minecraft Modpack Launcher",
   "productName": "Nova Link",
   "main": "./out/main/index.js",
@@ -109,7 +109,8 @@
     "publish": {
       "provider": "github",
       "owner": "S-BlackDragon",
-      "repo": "Nova-Link"
+      "repo": "Nova-Link",
+      "releaseType": "release"
     }
   }
 }

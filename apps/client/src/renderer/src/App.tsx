@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
@@ -8,6 +9,8 @@ import ResetPassword from './components/Auth/ResetPassword';
 import Dashboard from './components/Dashboard';
 import UpdateModal from './components/UpdateModal';
 import { LogProvider } from './contexts/LogContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { API_BASE_URL } from './config/api';
 import './assets/main.css';
 
 const queryClient = new QueryClient();
@@ -20,6 +23,53 @@ function App(): React.JSX.Element {
   const [view, setView] = useState<AuthView>('login');
   const [tempEmail, setTempEmail] = useState<string>('');
   const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    // Response interceptor for session expiry
+    const responseInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          handleLogout();
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    // Request interceptor to attach token to local API calls
+    const requestInterceptor = axios.interceptors.request.use(
+      (config) => {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) return config;
+
+          // Robust check for local API calls
+          const url = config.url || '';
+          const isLocalApi =
+            url.startsWith(API_BASE_URL) ||
+            url.startsWith('/') ||
+            url.includes('163.192.96.105:3000');
+
+          if (isLocalApi) {
+            // Ensure headers object exists
+            if (!config.headers) {
+              config.headers = {} as any;
+            }
+            config.headers.Authorization = `Bearer ${token}`;
+          }
+        } catch (err) {
+          console.error('Error in axios request interceptor:', err);
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    return () => {
+      axios.interceptors.response.eject(responseInterceptor);
+      axios.interceptors.request.eject(requestInterceptor);
+    };
+  }, []);
 
   useEffect(() => {
     // Startup initialization
@@ -156,7 +206,7 @@ function App(): React.JSX.Element {
 
           {/* Version badge */}
           <div className="absolute bottom-0 translate-y-32">
-            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Version 1.0.18</span>
+            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Version {__APP_VERSION__}</span>
           </div>
         </div>
       </div>
@@ -164,7 +214,14 @@ function App(): React.JSX.Element {
   }
 
   const content = token && user ? (
-    <Dashboard user={user} onLogout={handleLogout} />
+    <Dashboard
+      user={user}
+      onLogout={handleLogout}
+      onUserUpdate={(updatedUser) => {
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }}
+    />
   ) : (
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-950 p-6">
       <div className="w-full flex justify-center animate-in fade-in zoom-in duration-500">
@@ -176,8 +233,10 @@ function App(): React.JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
       <LogProvider>
-        {content}
-        <UpdateModal />
+        <ToastProvider>
+          {content}
+          <UpdateModal />
+        </ToastProvider>
       </LogProvider>
     </QueryClientProvider>
   );

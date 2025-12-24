@@ -43,7 +43,12 @@ let ModpacksService = class ModpacksService {
     }
     findAll() {
         return this.prisma.modpack.findMany({
-            include: { author: true },
+            include: {
+                author: true,
+                versions: {
+                    orderBy: { createdAt: 'desc' }
+                }
+            },
         });
     }
     findByUser(userId) {
@@ -52,11 +57,35 @@ let ModpacksService = class ModpacksService {
             include: {
                 versions: {
                     orderBy: { createdAt: 'desc' },
-                    take: 1,
                     include: { mods: true }
                 }
             },
         });
+    }
+    async findSharedByUser(userId) {
+        const groupMemberships = await this.prisma.groupMember.findMany({
+            where: { userId },
+            include: {
+                group: {
+                    include: {
+                        targetModpack: {
+                            include: {
+                                versions: {
+                                    orderBy: { createdAt: 'desc' },
+                                    include: { mods: true }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        const targetedByGroups = groupMemberships
+            .map(m => m.group.targetModpack)
+            .filter((mp) => mp !== null && mp.authorId !== userId);
+        const modpackMap = new Map();
+        targetedByGroups.forEach(mp => modpackMap.set(mp.id, mp));
+        return Array.from(modpackMap.values());
     }
     findOne(id) {
         return this.prisma.modpack.findUnique({
@@ -73,28 +102,6 @@ let ModpacksService = class ModpacksService {
             where: { id },
             data: updateModpackDto,
         });
-    }
-    async getManifest(versionId) {
-        const version = await this.prisma.modpackVersion.findUnique({
-            where: { id: versionId },
-            include: {
-                modpack: true,
-                mods: {
-                    where: { enabled: true }
-                }
-            },
-        });
-        if (!version) {
-            throw new Error('Version not found');
-        }
-        return {
-            modpackName: version.modpack.name,
-            versionNumber: version.versionNumber,
-            gameVersion: version.gameVersion,
-            loaderType: version.loaderType,
-            loaderVersion: version.loaderVersion,
-            mods: version.mods,
-        };
     }
     async addMod(versionId, modData) {
         const version = await this.prisma.modpackVersion.findUnique({
@@ -147,6 +154,13 @@ let ModpacksService = class ModpacksService {
                     continue;
                 }
                 console.log(`[AddMod] Selected version ${targetVersion.id} for ${currentId}, deps: ${targetVersion.dependencies?.length || 0}`);
+                const primaryFile = targetVersion.files.find((f) => f.primary) || targetVersion.files[0];
+                const fileMetadata = primaryFile ? {
+                    url: primaryFile.url,
+                    filename: primaryFile.filename,
+                    sha1: primaryFile.hashes?.sha1,
+                    size: primaryFile.size
+                } : {};
                 if (!queuedData) {
                     const project = await this.modrinthService.getProject(currentId);
                     modsToAdd.set(currentId, {
@@ -154,11 +168,13 @@ let ModpacksService = class ModpacksService {
                         name: project.title,
                         iconUrl: project.icon_url,
                         versionId: targetVersion.id,
-                        projectType: project.project_type
+                        projectType: project.project_type,
+                        ...fileMetadata
                     });
                 }
                 else {
                     queuedData.versionId = targetVersion.id;
+                    Object.assign(queuedData, fileMetadata);
                     modsToAdd.set(currentId, queuedData);
                 }
                 if (targetVersion.dependencies) {
@@ -188,6 +204,10 @@ let ModpacksService = class ModpacksService {
                     versionId: mod.versionId,
                     iconUrl: mod.iconUrl,
                     projectType: mod.projectType,
+                    filename: mod.filename,
+                    url: mod.url,
+                    sha1: mod.sha1,
+                    size: mod.size,
                 },
             });
             createdMods.push(created);

@@ -1,0 +1,18 @@
+node_modules
+dist
+out
+*.log
+.env
+.env.local
+.DS_Store
+
+# Java runtimes
+runtime/
+java/
+
+# Modpacks / Instances
+instances/
+CobbleverseNeoForged/
+/CobbleverseNeoForged/
+**/CobbleverseNeoForged/**
+uploads/

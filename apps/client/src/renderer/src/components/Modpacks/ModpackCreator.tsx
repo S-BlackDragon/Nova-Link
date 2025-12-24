@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Plus, Loader2, X, ChevronDown, Layers, Terminal } from 'lucide-react';
+import { Package, Plus, Loader2, X, ChevronDown, Layers, Terminal, Hash } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
 
 interface ModpackCreatorProps {
@@ -18,6 +18,8 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [mcVersions, setMcVersions] = useState<any[]>([]);
+    const [availableLoaderVersions, setAvailableLoaderVersions] = useState<string[]>([]);
+    const [loadingLoaderVersions, setLoadingLoaderVersions] = useState(false);
 
     const loaders = ['Fabric', 'Forge', 'Quilt', 'NeoForge'];
 
@@ -33,12 +35,76 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
         fetchVersions();
     }, []);
 
+    // Fetch Loader Versions
+    useEffect(() => {
+        const fetchLoaderVersions = async () => {
+            setLoadingLoaderVersions(true);
+            setAvailableLoaderVersions([]);
+            setLoaderVersion('latest');
+
+            const loaderType = loader.toLowerCase();
+
+            try {
+                if (loaderType === 'fabric') {
+                    const res = await axios.get('https://meta.fabricmc.net/v2/versions/loader');
+                    const versions = res.data.map((v: any) => v.version).slice(0, 20);
+                    setAvailableLoaderVersions(versions);
+                } else if (loaderType === 'quilt') {
+                    const res = await axios.get('https://meta.quiltmc.org/v3/versions/loader');
+                    const versions = res.data.map((v: any) => v.version).slice(0, 20);
+                    setAvailableLoaderVersions(versions);
+                } else if (loaderType === 'neoforge') {
+                    const res = await axios.get('https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml');
+                    const match = res.data.matchAll(/<version>(.*?)<\/version>/g);
+                    const all = Array.from(match).map((m: any) => m[1]);
+
+                    const gameParts = gameVersion.split('.');
+                    const minor = parseInt(gameParts[1]);
+                    let filtered: string[] = [];
+
+                    if (minor >= 21) {
+                        const prefix = `${minor}.${gameParts[2] || 0}.`;
+                        filtered = all.filter(v => v.startsWith(prefix));
+                    } else {
+                        const prefix = `${gameVersion}-`;
+                        filtered = all.filter(v => v.startsWith(prefix));
+                    }
+
+                    filtered.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+                    setAvailableLoaderVersions(filtered.slice(0, 30));
+                    if (filtered.length > 0) setLoaderVersion(filtered[0]);
+
+                } else if (loaderType === 'forge') {
+                    const res = await axios.get('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json');
+                    const promos = res.data.promos;
+                    const specific: string[] = [];
+                    if (promos[`${gameVersion}-latest`]) specific.push(promos[`${gameVersion}-latest`]);
+                    if (promos[`${gameVersion}-recommended`]) specific.push(promos[`${gameVersion}-recommended`]);
+
+                    const unique = Array.from(new Set(specific));
+                    if (unique.length === 0) {
+                        setAvailableLoaderVersions(['latest']);
+                    } else {
+                        setAvailableLoaderVersions([...unique]);
+                        setLoaderVersion(unique[0]);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch loader versions', e);
+                setAvailableLoaderVersions(['latest']);
+            } finally {
+                setLoadingLoaderVersions(false);
+            }
+        };
+
+        fetchLoaderVersions();
+    }, [loader, gameVersion]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
         try {
-            // 1. Create Modpack
             const modpackResponse = await axios.post(`${API_BASE_URL}/modpacks`, {
                 name,
                 description,
@@ -151,15 +217,28 @@ export default function ModpackCreator({ userId, onCreated, onCancel }: ModpackC
 
                             <div className="space-y-4">
                                 <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-2">
+                                    <Hash className="w-3 h-3" />
                                     Loader Version
                                 </label>
-                                <input
-                                    type="text"
-                                    value={loaderVersion}
-                                    onChange={(e) => setLoaderVersion(e.target.value)}
-                                    placeholder="e.g. 0.14.22 or latest"
-                                    className="w-full bg-slate-800/50 border border-white/5 rounded-[1.5rem] py-6 px-8 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-                                />
+                                <div className="relative">
+                                    <select
+                                        value={loaderVersion}
+                                        onChange={(e) => setLoaderVersion(e.target.value)}
+                                        disabled={loadingLoaderVersions}
+                                        className="w-full appearance-none bg-slate-800/50 border border-white/5 rounded-[1.5rem] py-6 px-8 text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer disabled:opacity-50"
+                                    >
+                                        {loadingLoaderVersions ? (
+                                            <option>Loading...</option>
+                                        ) : availableLoaderVersions.length > 0 ? (
+                                            availableLoaderVersions.map(v => (
+                                                <option key={v} value={v}>{v}</option>
+                                            ))
+                                        ) : (
+                                            <option value="latest">Latest</option>
+                                        )}
+                                    </select>
+                                    <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5 pointer-events-none" />
+                                </div>
                             </div>
                         </div>
 

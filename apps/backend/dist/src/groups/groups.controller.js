@@ -15,78 +15,107 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.GroupsController = void 0;
 const common_1 = require("@nestjs/common");
 const groups_service_1 = require("./groups.service");
-const create_group_dto_1 = require("./dto/create-group.dto");
-const update_group_dto_1 = require("./dto/update-group.dto");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
 let GroupsController = class GroupsController {
     groupsService;
     constructor(groupsService) {
         this.groupsService = groupsService;
     }
-    join(body) {
-        return this.groupsService.joinByCode(body.userId, body.inviteCode);
+    create(req, body) {
+        console.log(`[GroupsController] Received create request for "${body.name}" from user ${req.user?.id}`);
+        return this.groupsService.createGroup(req.user.id, body.name);
     }
-    create(createGroupDto) {
-        return this.groupsService.create(createGroupDto);
+    join(req, body) {
+        return this.groupsService.joinGroup(req.user.id, body.inviteCode);
     }
-    findAll(userId) {
-        return this.groupsService.findAll(userId);
+    findAll(req) {
+        return this.groupsService.getUserGroups(req.user.id);
     }
-    findOne(id) {
-        return this.groupsService.findOne(id);
+    findOne(req, id) {
+        return this.groupsService.getGroupDetails(req.user.id, id);
     }
-    update(id, updateGroupDto) {
-        return this.groupsService.update(id, updateGroupDto);
+    updateTarget(req, id, body) {
+        return this.groupsService.updateTarget(req.user.id, id, body.modpackId, body.versionId);
     }
-    remove(id) {
-        return this.groupsService.remove(id);
+    leaveGroup(req, id) {
+        return this.groupsService.leaveGroup(req.user.id, id);
+    }
+    removeMember(req, groupId, userId) {
+        return this.groupsService.removeMember(req.user.id, groupId, userId);
+    }
+    deleteGroup(req, id) {
+        return this.groupsService.deleteGroup(req.user.id, id);
     }
 };
 exports.GroupsController = GroupsController;
 __decorate([
-    (0, common_1.Post)('join'),
-    __param(0, (0, common_1.Body)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], GroupsController.prototype, "join", null);
-__decorate([
     (0, common_1.Post)(),
-    __param(0, (0, common_1.Body)()),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [create_group_dto_1.CreateGroupDto]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", void 0)
 ], GroupsController.prototype, "create", null);
 __decorate([
-    (0, common_1.Get)(),
-    __param(0, (0, common_1.Query)('userId')),
+    (0, common_1.Post)('join'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], GroupsController.prototype, "join", null);
+__decorate([
+    (0, common_1.Get)(),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], GroupsController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)(':id'),
-    __param(0, (0, common_1.Param)('id')),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], GroupsController.prototype, "findOne", null);
 __decorate([
-    (0, common_1.Patch)(':id'),
-    __param(0, (0, common_1.Param)('id')),
-    __param(1, (0, common_1.Body)()),
+    (0, common_1.Post)(':id/target'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, update_group_dto_1.UpdateGroupDto]),
+    __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", void 0)
-], GroupsController.prototype, "update", null);
+], GroupsController.prototype, "updateTarget", null);
+__decorate([
+    (0, common_1.Post)(':id/leave'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], GroupsController.prototype, "leaveGroup", null);
+__decorate([
+    (0, common_1.Delete)(':id/members/:userId'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Param)('userId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", void 0)
+], GroupsController.prototype, "removeMember", null);
 __decorate([
     (0, common_1.Delete)(':id'),
-    __param(0, (0, common_1.Param)('id')),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
-], GroupsController.prototype, "remove", null);
+], GroupsController.prototype, "deleteGroup", null);
 exports.GroupsController = GroupsController = __decorate([
     (0, common_1.Controller)('groups'),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [groups_service_1.GroupsService])
 ], GroupsController);
 //# sourceMappingURL=groups.controller.js.map

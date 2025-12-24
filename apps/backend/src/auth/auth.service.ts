@@ -7,6 +7,10 @@ import { CreateAuthDto } from './dto/create-auth.dto';
 import { LoginDto } from './dto/login.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RequestEmailChangeDto } from './dto/request-email-change.dto';
+import { ConfirmEmailChangeDto } from './dto/confirm-email-change.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -195,7 +199,7 @@ export class AuthService {
     const payload = { sub: user.id, username: user.username };
     return {
       access_token: await this.jwtService.signAsync(payload),
-      user: { id: user.id, username: user.username, email: user.email },
+      user: { id: user.id, username: user.username, email: user.email, avatarUrl: user.avatarUrl },
     };
   }
 
@@ -254,5 +258,114 @@ export class AuthService {
     });
 
     return { message: 'Password reset successful. You can now login with your new password.' };
+  }
+
+  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+    // If username is changing, check uniqueness
+    if (updateProfileDto.username) {
+      const existing = await this.prisma.user.findFirst({
+        where: {
+          username: updateProfileDto.username,
+          NOT: { id: userId },
+        },
+      });
+      if (existing) throw new ConflictException('Username already taken');
+    }
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: updateProfileDto,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatarUrl: true,
+      },
+    });
+  }
+
+  async requestEmailChange(userId: string, dto: RequestEmailChangeDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new BadRequestException('User not found');
+
+    // Check if new email is already in use
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.newEmail } });
+    if (existing) throw new ConflictException('Email already in use');
+
+    // Generate code and send to NEW email
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 1);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        verificationCode,
+        verificationExpires: expires,
+      },
+    });
+
+    await this.mailService.sendVerificationEmail(dto.newEmail, user.username, verificationCode);
+
+    return { message: 'Verification code sent to your new email address.' };
+  }
+
+  async confirmEmailChange(userId: string, dto: ConfirmEmailChangeDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.verificationCode !== dto.code.trim()) {
+      throw new BadRequestException('Invalid or expired verification code');
+    }
+
+    if (user.verificationExpires && user.verificationExpires < new Date()) {
+      throw new BadRequestException('Verification code expired');
+    }
+
+    // Double check email availability right before update
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.newEmail } });
+    if (existing) throw new ConflictException('Email already in use');
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: dto.newEmail,
+        verificationCode: null,
+        verificationExpires: null,
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+      },
+    });
+  }
+
+  async updatePassword(userId: string, dto: UpdatePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const isPasswordValid = await bcrypt.compare(dto.oldPassword, user.passwordHash);
+    if (!isPasswordValid) throw new BadRequestException('Current password incorrect');
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hashedPassword },
+    });
+
+    return { message: 'Password updated successfully' };
+  }
+
+  async updateAvatar(userId: string, avatarUrl: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatarUrl: true,
+      },
+    });
   }
 }

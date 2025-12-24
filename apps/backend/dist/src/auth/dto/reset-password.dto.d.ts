@@ -1,4 +1,5 @@
 export declare class ResetPasswordDto {
-    token: string;
+    email: string;
+    code: string;
     newPassword: string;
 }

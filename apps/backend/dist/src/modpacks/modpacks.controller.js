@@ -18,6 +18,7 @@ const modpacks_service_1 = require("./modpacks.service");
 const create_modpack_dto_1 = require("./dto/create-modpack.dto");
 const update_modpack_dto_1 = require("./dto/update-modpack.dto");
 const publish_version_dto_1 = require("./dto/publish-version.dto");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
 let ModpacksController = class ModpacksController {
     modpacksService;
     constructor(modpacksService) {
@@ -28,9 +29,6 @@ let ModpacksController = class ModpacksController {
     }
     publishVersion(id, publishVersionDto) {
         return this.modpacksService.publishVersion(id, publishVersionDto);
-    }
-    getManifest(versionId) {
-        return this.modpacksService.getManifest(versionId);
     }
     addMod(versionId, modData) {
         return this.modpacksService.addMod(versionId, modData);
@@ -46,6 +44,9 @@ let ModpacksController = class ModpacksController {
     }
     findByUser(userId) {
         return this.modpacksService.findByUser(userId);
+    }
+    findSharedByUser(userId) {
+        return this.modpacksService.findSharedByUser(userId);
     }
     findOne(id) {
         return this.modpacksService.findOne(id);
@@ -73,13 +74,6 @@ __decorate([
     __metadata("design:paramtypes", [String, publish_version_dto_1.PublishVersionDto]),
     __metadata("design:returntype", void 0)
 ], ModpacksController.prototype, "publishVersion", null);
-__decorate([
-    (0, common_1.Get)('versions/:versionId/manifest'),
-    __param(0, (0, common_1.Param)('versionId')),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
-    __metadata("design:returntype", void 0)
-], ModpacksController.prototype, "getManifest", null);
 __decorate([
     (0, common_1.Post)('versions/:versionId/mods'),
     __param(0, (0, common_1.Param)('versionId')),
@@ -117,6 +111,13 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], ModpacksController.prototype, "findByUser", null);
 __decorate([
+    (0, common_1.Get)('user/:userId/shared'),
+    __param(0, (0, common_1.Param)('userId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], ModpacksController.prototype, "findSharedByUser", null);
+__decorate([
     (0, common_1.Get)(':id'),
     __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -140,6 +141,7 @@ __decorate([
 ], ModpacksController.prototype, "remove", null);
 exports.ModpacksController = ModpacksController = __decorate([
     (0, common_1.Controller)('modpacks'),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [modpacks_service_1.ModpacksService])
 ], ModpacksController);
 //# sourceMappingURL=modpacks.controller.js.map
