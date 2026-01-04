@@ -34,11 +34,14 @@ services:
       # Add other env vars here (SMTP, etc.)
     depends_on:
       - postgres
+    volumes:
+      - uploads_data:/app/uploads
     networks:
       - nova_network
 
 volumes:
   postgres_data:
+  uploads_data:
 
 
 networks:
