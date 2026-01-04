@@ -1,8 +1,8 @@
 # --- Build Stage ---
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
-# Install OpenSSL 1.1 compatibility library
-RUN apk add --no-cache openssl libressl3.8-libssl
+# Install OpenSSL for Prisma
+RUN apt-get update && apt-get install -y openssl libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -24,13 +24,12 @@ RUN npx prisma generate
 RUN npm run build
 
 # --- Production Stage ---
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Install OpenSSL 1.1 compatibility library for runtime
-# This provides libssl.so.1.1 that Prisma needs
-RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.16/main openssl1.1-compat
+# Install OpenSSL runtime for Prisma
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
@@ -39,7 +38,7 @@ COPY prisma ./prisma/
 # Install production dependencies only
 RUN npm ci --only=production
 
-# Regenerate Prisma Client with the correct OpenSSL available
+# Regenerate Prisma Client in production stage
 RUN npx prisma generate
 
 # Copy built assets from builder stage
