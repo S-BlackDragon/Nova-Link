@@ -1,6 +1,6 @@
 {
   "name": "nova-link",
-  "version": "1.0.64",
+  "version": "1.0.65",
   "description": "Nova Link - Minecraft Modpack Launcher",
   "productName": "Nova Link",
   "main": "./out/main/index.js",

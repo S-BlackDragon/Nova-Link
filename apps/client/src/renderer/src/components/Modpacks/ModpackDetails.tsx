@@ -252,7 +252,9 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             const token = localStorage.getItem('token');
             let manifest;
             try {
-                const response = await axios.get(`${API_BASE_URL}/sync/manifest/${currentVersion.id}`);
+                const response = await axios.get(`${API_BASE_URL}/sync/manifest/${currentVersion.id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
                 manifest = response.data;
             } catch (err: any) {
                 console.error('Manifest fetch failed:', err);

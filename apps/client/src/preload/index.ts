@@ -22,7 +22,7 @@ const api = {
 
   // Sync API
   sync: {
-    start: (instanceId: string, manifest: any) => electronAPI.ipcRenderer.invoke('sync:start', instanceId, manifest),
+    start: (instanceId: string, manifest: any, token?: string) => electronAPI.ipcRenderer.invoke('sync:start', instanceId, manifest, token),
     onProgress: (callback: (progress: any) => void) => {
       const handler = (_event: any, progress: any) => callback(progress);
       electronAPI.ipcRenderer.on('sync:progress', handler);
