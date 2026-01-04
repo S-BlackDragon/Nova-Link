@@ -1,8 +1,8 @@
+# --- Build Stage ---
+FROM node:20-alpine AS builder
 
-FROM node:20-slim AS builder
-
-# Install OpenSSL for Prisma
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL 3 for Prisma
+RUN apk add --no-cache openssl
 
 # Set working directory
 WORKDIR /app
@@ -17,19 +17,19 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client with explicit target
 RUN npx prisma generate
 
 # Build the application
 RUN npm run build
 
 # --- Production Stage ---
-FROM node:20-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL 3 for Prisma runtime
+RUN apk add --no-cache openssl
 
 # Copy package files
 COPY package*.json ./
@@ -38,9 +38,11 @@ COPY prisma ./prisma/
 # Install production dependencies only
 RUN npm ci --only=production
 
+# Regenerate Prisma Client in production stage
+RUN npx prisma generate
+
 # Copy built assets from builder stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Expose port
 EXPOSE 3000
