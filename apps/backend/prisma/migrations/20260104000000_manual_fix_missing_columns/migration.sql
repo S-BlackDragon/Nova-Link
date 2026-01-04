@@ -12,5 +12,12 @@ ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "sha1" TEXT;
 ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "size" INTEGER;
 ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "enabled" BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "side" TEXT NOT NULL DEFAULT 'both';
--- projectType might already be there from 20251221195702_add_project_type but good to be safe/consistent if re-running
 ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "projectType" TEXT NOT NULL DEFAULT 'mod';
+
+-- Missing columns identified in second round
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "summary" TEXT;
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "iconUrl" TEXT;
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "author" TEXT;
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "modrinthId" TEXT;
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "curseforgeId" TEXT;
+ALTER TABLE "Mod" ADD COLUMN IF NOT EXISTS "versionId" TEXT;
