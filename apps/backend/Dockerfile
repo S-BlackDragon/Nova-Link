@@ -1,8 +1,8 @@
 # --- Build Stage ---
 FROM node:20-alpine AS builder
 
-# Install OpenSSL 3 for Prisma
-RUN apk add --no-cache openssl
+# Install OpenSSL 3 and build dependencies
+RUN apk add --no-cache openssl openssl-dev
 
 # Set working directory
 WORKDIR /app
@@ -16,6 +16,9 @@ RUN npm ci
 
 # Copy source code
 COPY . .
+
+# Force Prisma to use OpenSSL 3.0.x engine for Alpine ARM64
+ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-arm64-openssl-3.0.x
 
 # Generate Prisma Client with explicit target
 RUN npx prisma generate
@@ -38,7 +41,10 @@ COPY prisma ./prisma/
 # Install production dependencies only
 RUN npm ci --only=production
 
-# Regenerate Prisma Client in production stage
+# Set runtime Prisma binary target
+ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-arm64-openssl-3.0.x
+
+# Regenerate Prisma Client in production stage with correct binary
 RUN npx prisma generate
 
 # Copy built assets from builder stage
