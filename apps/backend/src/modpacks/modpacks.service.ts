@@ -121,10 +121,16 @@ export class ModpacksService {
     const installedModIds = new Set(existingMods.map(m => m.modrinthId));
 
     // 3. Resolve the initial mod to its canonical ID
-    const initialProject = await this.modrinthService.getProject(modData.modrinthId);
-    if (!initialProject) throw new Error(`Could not find mod ${modData.modrinthId}`);
+    const modId = modData.modrinthId || modData.project_id || modData.id || modData.slug;
+    if (!modId) {
+      console.error('[AddMod] No valid mod ID found in payload:', modData);
+      throw new Error('No valid mod ID provided');
+    }
+
+    const initialProject = await this.modrinthService.getProject(modId);
+    if (!initialProject) throw new Error(`Could not find mod ${modId}`);
     const canonicalId = initialProject.id;
-    console.log(`[AddMod] Initial mod: ${modData.modrinthId} resolved to canonical: ${canonicalId}`);
+    console.log(`[AddMod] Initial mod: ${modId} resolved to canonical: ${canonicalId}`);
 
     // 4. Queue for dependency resolution
     const queue = [canonicalId];

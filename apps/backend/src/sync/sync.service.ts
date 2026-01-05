@@ -42,6 +42,7 @@ export class SyncService {
                 versionID: mod.versionId,
                 url: mod.url,
             })),
+            mods: version.mods, // Required for legacy launch logic
             // If manifestJson exists (pre-calculated snapshot), use that instead as it's static and faster
             ...((version.manifestJson as any) || {})
         };
