@@ -67,8 +67,28 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                     new Date(b.date_published).getTime() - new Date(a.date_published).getTime()
                 );
                 setVersions(sortedVersions);
+
                 if (sortedVersions.length > 0) {
-                    setSelectedVersion(sortedVersions[0]);
+                    // Find first compatible version (matching both loader AND game version from modpack)
+                    const compatibleVersion = sortedVersions.find((v: any) => {
+                        const normalizedLoader = loader?.toLowerCase();
+                        const versionLoaders = v.loaders?.map((l: string) => l.toLowerCase()) || [];
+
+                        // Check loader compatibility
+                        const hasLoader = !loader || loader === 'Any' ||
+                            versionLoaders.includes(normalizedLoader) ||
+                            // Forge/NeoForge interoperability
+                            (normalizedLoader === 'neoforge' && versionLoaders.includes('forge')) ||
+                            (normalizedLoader === 'forge' && versionLoaders.includes('neoforge'));
+
+                        // Check game version compatibility
+                        const hasGameVersion = !gameVersion || gameVersion === 'Any' ||
+                            (v.game_versions && v.game_versions.includes(gameVersion));
+
+                        return hasLoader && hasGameVersion;
+                    });
+
+                    setSelectedVersion(compatibleVersion || sortedVersions[0]);
                 } else {
                     setSelectedVersion(null);
                 }
@@ -127,7 +147,16 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
         if (!onAddMod) return;
 
         const compatibility = checkCompatibility(v);
-        if ((compatibility.loader !== true || compatibility.gameVersion !== true) && !force) {
+
+        // Completely block if loader is incompatible (false = different loader family like Fabric vs Forge)
+        if (compatibility.loader === false) {
+            setPendingVersion(v);
+            setShowWarning(true);
+            return; // Cannot proceed even with force - this mod will never work
+        }
+
+        // Show warning for potential issues (but allow proceeding)
+        if ((compatibility.loader === 'warn' || compatibility.gameVersion !== true) && !force) {
             setPendingVersion(v);
             setShowWarning(true);
             return;
@@ -221,8 +250,12 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                         )}
                     </div>
 
-                    {selectedVersion && canEdit && (
-                        project.project_type === 'modpack' ? (
+                    {selectedVersion && canEdit && (() => {
+                        const compat = checkCompatibility(selectedVersion);
+                        const isBlocked = compat.loader === false;
+                        const hasWarning = compat.loader === 'warn' || compat.gameVersion !== true;
+
+                        return project.project_type === 'modpack' ? (
                             <div className="flex items-center gap-4">
                                 <span className="text-amber-500 font-bold text-sm bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20">
                                     Modpacks cannot be added to other modpacks
@@ -245,17 +278,27 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                     Import as New Modpack
                                 </button>
                             </div>
+                        ) : isBlocked ? (
+                            <div className="flex items-center gap-3">
+                                <span className="text-red-500 font-bold text-sm bg-red-500/10 px-4 py-2 rounded-xl border border-red-500/20 flex items-center gap-2">
+                                    <X className="w-4 h-4" />
+                                    No compatible version for {loader}
+                                </span>
+                            </div>
                         ) : (
                             <button
                                 onClick={() => handleAdd(selectedVersion)}
                                 disabled={adding}
-                                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button mb-1 mt-1"
+                                className={`px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button mb-1 mt-1 ${hasWarning
+                                        ? 'bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white'
+                                        : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white'
+                                    }`}
                             >
-                                {adding ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                                {adding ? 'Adding...' : `Add Latest (${selectedVersion.version_number})`}
+                                {adding ? <Loader2 className="w-5 h-5 animate-spin" /> : hasWarning ? <AlertCircle className="w-5 h-5" /> : <Download className="w-5 h-5" />}
+                                {adding ? 'Adding...' : hasWarning ? `Add with Warning (${selectedVersion.version_number})` : `Add Latest (${selectedVersion.version_number})`}
                             </button>
-                        )
-                    )}
+                        );
+                    })()}
                 </div>
 
                 {/* Tab Content Area */}
