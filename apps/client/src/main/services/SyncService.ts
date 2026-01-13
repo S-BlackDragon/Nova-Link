@@ -35,20 +35,22 @@ export class SyncService extends EventEmitter {
         });
     }
 
-    async getLocalState(instanceId: string): Promise<any> {
-        const statePath = path.join(this.instancesPath, instanceId, 'novalink-state.json');
+    async getLocalState(instanceId: string, rootPath?: string): Promise<any> {
+        const baseDir = rootPath ? path.join(rootPath, 'instances') : this.instancesPath;
+        const statePath = path.join(baseDir, instanceId, 'novalink-state.json');
         if (fs.existsSync(statePath)) {
             return fs.readJson(statePath);
         }
         return { files: {} };
     }
 
-    async saveLocalState(instanceId: string, state: any) {
-        const statePath = path.join(this.instancesPath, instanceId, 'novalink-state.json');
+    async saveLocalState(instanceId: string, state: any, rootPath?: string) {
+        const baseDir = rootPath ? path.join(rootPath, 'instances') : this.instancesPath;
+        const statePath = path.join(baseDir, instanceId, 'novalink-state.json');
         await fs.writeJson(statePath, state, { spaces: 2 });
     }
 
-    async startSync(instanceId: string, manifest: any, onProgress: (progress: any) => void, token?: string) {
+    async startSync(instanceId: string, manifest: any, onProgress: (progress: any) => void, token?: string, rootPath?: string) {
         // Setup cancellation
         this.cancelSync(instanceId);
         const controller = new AbortController();
@@ -56,12 +58,16 @@ export class SyncService extends EventEmitter {
         const signal = controller.signal;
 
         try {
-            const instanceDir = path.join(this.instancesPath, instanceId);
+            // Use provided rootPath or default to this.instancesPath
+            const baseDir = rootPath ? path.join(rootPath, 'instances') : this.instancesPath;
+            const instanceDir = path.join(baseDir, instanceId);
             await fs.ensureDir(instanceDir);
+
+            console.log(`[SyncService] Starting sync for ${instanceId} in ${instanceDir}`);
 
             if (signal.aborted) throw new Error('Cancelled');
 
-            const localState = await this.getLocalState(instanceId);
+            const localState = await this.getLocalState(instanceId, rootPath);
             const stagingDir = path.join(instanceDir, '.staging');
             await fs.emptyDir(stagingDir);
 
@@ -107,6 +113,12 @@ export class SyncService extends EventEmitter {
             for (const file of filesToDownload) {
                 if (signal.aborted) throw new Error('Cancelled');
                 onProgress({ status: 'downloading', percent: total > 0 ? (completed / total) * 100 : 0, file: file.path });
+
+                if (!file.url) {
+                    console.warn(`[SyncService] Skipping file with no URL: ${file.path}`);
+                    completed++;
+                    continue;
+                }
 
                 const stagingPath = path.join(stagingFilesDir, file.path);
                 await fs.ensureDir(path.dirname(stagingPath));
@@ -206,7 +218,7 @@ export class SyncService extends EventEmitter {
             // Save state
             localState.targetVersionId = manifest.versionId;
             localState.lastSyncedAt = new Date().toISOString();
-            await this.saveLocalState(instanceId, localState);
+            await this.saveLocalState(instanceId, localState, rootPath);
 
             onProgress({ status: 'completed', percent: 100 });
         } catch (error: any) {
@@ -219,13 +231,10 @@ export class SyncService extends EventEmitter {
             }
             throw error;
         } finally {
-            // Cleanup staging if it exists?
-            const instanceDir = path.join(this.instancesPath, instanceId);
+            // Cleanup staging if it exists
+            const baseDir = rootPath ? path.join(rootPath, 'instances') : this.instancesPath;
+            const instanceDir = path.join(baseDir, instanceId);
             const stagingDir = path.join(instanceDir, '.staging');
-            // Typically we might want to keep downloaded files for resume, but for now clean up to be safe
-            // await fs.remove(stagingDir); 
-            // Correction: Remove staging on complete or error to avoid cruft.
-            // Resume logic would be better but let's stick to clean sync.
             await fs.remove(stagingDir);
 
             this.abortControllers.delete(instanceId);

@@ -10,13 +10,11 @@ interface ModSearchProps {
     defaultLoader?: string;
     fixedFilters?: boolean;
     onAddMod?: (mod: any) => void;
-    onInstallModpack?: (mod: any) => void;
-    installingId?: string | null;
 }
 
 
 
-export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilters, onAddMod, onInstallModpack, installingId }: ModSearchProps) {
+export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilters, onAddMod }: ModSearchProps) {
     const [query, setQuery] = useState('');
     const [mods, setMods] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -264,9 +262,6 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 mods={trendingModpacks}
                                 onViewAll={() => { setProjectType('modpack'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
                                 labelColor="text-indigo-400"
-                                onInstallModpack={onInstallModpack}
-                                onAddMod={onAddMod}
-                                installingId={installingId}
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
                             />
@@ -279,9 +274,6 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 mods={trendingMods}
                                 onViewAll={() => { setProjectType('mod'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
                                 labelColor="text-emerald-400"
-                                onInstallModpack={onInstallModpack}
-                                onAddMod={onAddMod}
-                                installingId={installingId}
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
                             />
@@ -294,9 +286,6 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 mods={trendingResourcePacks}
                                 onViewAll={() => { setProjectType('resourcepack'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
                                 labelColor="text-amber-400"
-                                onInstallModpack={onInstallModpack}
-                                onAddMod={onAddMod}
-                                installingId={installingId}
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
                             />
@@ -321,7 +310,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                         <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8">
                                 {mods.map((mod) => (
-                                    <ModCard key={mod.project_id} mod={mod} onInstallModpack={onInstallModpack} onAddMod={onAddMod} installingId={installingId} setDetailedModId={setDetailedModId} compact={false} />
+                                    <ModCard key={mod.project_id} mod={mod} setDetailedModId={setDetailedModId} compact={false} />
                                 ))}
                             </div>
 
@@ -369,7 +358,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
     );
 }
 
-function DiscoverySection({ title, icon, bgColor, borderColor, mods, onViewAll, labelColor, onInstallModpack, onAddMod, installingId, setDetailedModId, status }: any) {
+function DiscoverySection({ title, icon, bgColor, borderColor, mods, onViewAll, labelColor, setDetailedModId, status }: any) {
     return (
         <section className="space-y-8">
             <div className="flex items-center justify-between px-2">
@@ -395,9 +384,6 @@ function DiscoverySection({ title, icon, bgColor, borderColor, mods, onViewAll, 
                         <ModCard
                             key={mod.project_id}
                             mod={mod}
-                            onInstallModpack={onInstallModpack}
-                            onAddMod={onAddMod}
-                            installingId={installingId}
                             setDetailedModId={setDetailedModId}
                         />
                     ))}
@@ -453,7 +439,7 @@ function EmptySearch() {
     );
 }
 
-function ModCard({ mod, onInstallModpack, onAddMod, installingId, setDetailedModId, compact = true }: any) {
+function ModCard({ mod, setDetailedModId, compact = true }: any) {
     return (
         <div
             onClick={() => setDetailedModId(mod.project_id || mod.slug)}
@@ -497,17 +483,12 @@ function ModCard({ mod, onInstallModpack, onAddMod, installingId, setDetailedMod
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        const isModpack = mod.project_type?.toLowerCase() === 'modpack';
-                        if (isModpack && onInstallModpack) {
-                            onInstallModpack(mod);
-                        } else {
-                            if (onAddMod) onAddMod(mod);
-                        }
+                        // Always open details modal for compatibility check
+                        setDetailedModId(mod.project_id || mod.slug);
                     }}
-                    disabled={installingId === (mod.project_id || mod.slug)}
-                    className={`flex items-center gap-2 ${compact ? 'text-xs px-4 py-2' : 'text-sm px-6 py-3'} font-black rounded-xl transition-all duration-300 shadow-lg active:scale-[0.95] border ${mod.project_type?.toLowerCase() === 'modpack' ? 'bg-indigo-600/10 hover:bg-indigo-600 text-indigo-500 hover:text-white border-indigo-500/20' : 'bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white border-emerald-500/20'}`}
+                    className={`flex items-center gap-2 ${compact ? 'text-xs px-4 py-2' : 'text-sm px-6 py-3'} font-black rounded-xl transition-all duration-300 shadow-lg active:scale-[0.95] border ${mod.project_type?.toLowerCase() === 'modpack' ? 'bg-indigo-600/10 hover:bg-indigo-600 text-indigo-500 hover:text-white border-indigo-500/20' : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border-white/5'}`}
                 >
-                    {installingId === (mod.project_id || mod.slug) ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>{mod.project_type?.toLowerCase() === 'modpack' ? 'Install' : 'Add'}</span>}
+                    <span>View Details</span>
                 </button>
             </div>
         </div>

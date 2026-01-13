@@ -152,18 +152,45 @@ export class GroupsService {
       where: { groupId_userId: { groupId, userId } }
     });
     if (!member) throw new NotFoundException('Not a member');
-    if (member.role === Role.ADMIN) {
-      // Prevent last admin from leaving? Or transfer ownership?
-      // For simplicity, allow leaving but if count goes to 0 group might persist or should be deleted.
-      // Or if owning, maybe block? ownerId is on Group.
-      const group = await this.prisma.group.findUnique({ where: { id: groupId } });
-      if (group && group.ownerId === userId) {
-        throw new BadRequestException('Owner cannot leave group. Delete it or transfer ownership.');
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      include: { _count: { select: { members: true } } }
+    });
+
+    if (group && group.ownerId === userId) {
+      if (group._count.members > 1) {
+        throw new BadRequestException('Owner cannot leave group without transferring ownership or deleting the group.');
+      } else {
+        throw new BadRequestException('Last member should delete the group instead of leaving.');
       }
     }
+
     return this.prisma.groupMember.delete({
       where: { groupId_userId: { groupId, userId } }
     });
+  }
+
+  async transferOwnership(ownerId: string, groupId: string, newOwnerId: string) {
+    const group = await this.prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) throw new NotFoundException('Group not found');
+    if (group.ownerId !== ownerId) throw new ForbiddenException('Only owner can transfer ownership');
+
+    const newOwnerMember = await this.prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: newOwnerId } }
+    });
+    if (!newOwnerMember) throw new BadRequestException('New owner must be a member');
+
+    return this.prisma.$transaction([
+      this.prisma.group.update({
+        where: { id: groupId },
+        data: { ownerId: newOwnerId }
+      }),
+      this.prisma.groupMember.update({
+        where: { groupId_userId: { groupId, userId: newOwnerId } },
+        data: { role: Role.ADMIN }
+      })
+    ]);
   }
 
   async removeMember(requesterId: string, groupId: string, userIdToRemove: string) {

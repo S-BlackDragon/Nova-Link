@@ -204,7 +204,7 @@ export default function ModpackSelector({ userId, mod, gameVersion: initialGameV
 
             // 3. Add Mod
             await axios.post(`${API_BASE_URL}/modpacks/versions/${versionResponse.data.id}/mods`, {
-                modrinthId: mod.project_id,
+                modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
                 versionId: null // Let backend pick matching version
@@ -254,7 +254,7 @@ export default function ModpackSelector({ userId, mod, gameVersion: initialGameV
             if (!versionId) throw new Error('No version found for this modpack.');
 
             await axios.post(`${API_BASE_URL}/modpacks/versions/${versionId}/mods`, {
-                modrinthId: mod.project_id,
+                modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
                 versionId: mod.version || null

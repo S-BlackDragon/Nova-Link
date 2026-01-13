@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api';
-import { X, User, Shield, Trash2, Copy, LogOut } from 'lucide-react';
+import { X, User, Shield, Trash2, Copy, LogOut, Crown, ArrowRightLeft } from 'lucide-react';
 import { ChangeTargetModal } from './ChangeTargetModal';
 import { DeleteConfirmationModal } from '../Modpacks/DeleteConfirmationModal';
 
@@ -38,6 +38,8 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
     }, [groupId]);
 
     const [showTargetModal, setShowTargetModal] = useState(false);
+    const [showTransferModal, setShowTransferModal] = useState(false);
+    const [isOwner, setIsOwner] = useState(false);
 
     const fetchGroupDetails = async () => {
         try {
@@ -47,10 +49,11 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
             });
             setGroup(response.data);
 
-            // Find my role
+            // Find my role and ownership
             const myId = JSON.parse(localStorage.getItem('user') || '{}').id;
             const me = response.data.members.find((m: any) => m.user.id === myId);
             if (me) setMyRole(me.role);
+            setIsOwner(response.data.ownerId === myId);
 
         } catch (error) {
             console.error('Failed to fetch group details:', error);
@@ -67,6 +70,21 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
     };
 
     const leaveGroup = async () => {
+        // If owner, must transfer ownership first
+        if (isOwner) {
+            setConfirmConfig({
+                isOpen: true,
+                title: 'Transfer Ownership First',
+                description: 'As the owner, you must transfer ownership to another member before leaving the group.',
+                type: 'warning',
+                onConfirm: () => {
+                    setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+                    setShowTransferModal(true);
+                }
+            });
+            return;
+        }
+
         setConfirmConfig({
             isOpen: true,
             title: 'Leave Group?',
@@ -82,6 +100,29 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                 } catch (error) {
                     console.error('Failed to leave group:', error);
                     alert('Failed to leave group.');
+                }
+            }
+        });
+    };
+
+    const transferOwnership = async (newOwnerId: string, newOwnerName: string) => {
+        setConfirmConfig({
+            isOpen: true,
+            title: 'Transfer Ownership?',
+            description: `Are you sure you want to transfer ownership to ${newOwnerName}? You will become a regular admin.`,
+            type: 'warning',
+            onConfirm: async () => {
+                try {
+                    const token = localStorage.getItem('token');
+                    await axios.post(`${API_BASE_URL}/groups/${groupId}/transfer-ownership`,
+                        { newOwnerId },
+                        { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    setShowTransferModal(false);
+                    fetchGroupDetails();
+                } catch (error) {
+                    console.error('Failed to transfer ownership:', error);
+                    alert('Failed to transfer ownership.');
                 }
             }
         });
@@ -150,6 +191,15 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        {isOwner && (
+                            <button
+                                onClick={() => setShowTransferModal(true)}
+                                className="p-2 hover:bg-amber-500/10 hover:text-amber-500 rounded-lg transition-colors text-zinc-400"
+                                title="Transfer Ownership"
+                            >
+                                <ArrowRightLeft size={20} />
+                            </button>
+                        )}
                         {isAdmin ? (
                             <button
                                 onClick={deleteGroup}
@@ -230,6 +280,9 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                                     </div>
 
                                     <div className="flex items-center gap-3">
+                                        {member.user.id === group?.ownerId && (
+                                            <Crown size={14} className="text-amber-500" />
+                                        )}
                                         <span className={`text-xs px-2 py-0.5 rounded font-medium border
                                             ${member.role === 'ADMIN' ? 'bg-amber-900/20 text-amber-500 border-amber-900/30' :
                                                 member.role === 'MODERATOR' ? 'bg-indigo-900/20 text-indigo-400 border-indigo-900/30' :
@@ -277,6 +330,45 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                 onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
                 onConfirm={confirmConfig.onConfirm}
             />
+
+            {/* Transfer Ownership Modal */}
+            {showTransferModal && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-md shadow-2xl">
+                        <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                            <h3 className="text-xl font-bold text-zinc-100">Transfer Ownership</h3>
+                            <button onClick={() => setShowTransferModal(false)} className="p-2 hover:bg-zinc-800 rounded-lg">
+                                <X size={18} className="text-zinc-400" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-3 max-h-80 overflow-y-auto">
+                            <p className="text-sm text-zinc-400 mb-4">Select a member to become the new owner:</p>
+                            {group?.members
+                                .filter((m: Member) => m.user.id !== group.ownerId)
+                                .map((member: Member) => (
+                                    <button
+                                        key={member.id}
+                                        onClick={() => transferOwnership(member.user.id, member.user.username)}
+                                        className="w-full flex items-center gap-3 p-3 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:bg-amber-500/10 hover:border-amber-500/30 transition-colors text-left"
+                                    >
+                                        {member.user.avatarUrl ? (
+                                            <img src={member.user.avatarUrl} alt={member.user.username} className="w-8 h-8 rounded-full bg-zinc-700" />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center">
+                                                <User size={14} className="text-zinc-400" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="font-medium text-zinc-200">{member.user.username}</div>
+                                            <div className="text-xs text-zinc-500">{member.role}</div>
+                                        </div>
+                                        <Crown size={16} className="ml-auto text-amber-500/50" />
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

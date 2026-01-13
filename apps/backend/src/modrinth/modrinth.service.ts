@@ -59,8 +59,8 @@ export class ModrinthService {
     async getProjectVersions(id: string, gameVersion?: string, loader?: string) {
         try {
             const params: any = {};
-            if (loader && loader !== 'Any') params.loaders = loader.toLowerCase();
-            if (gameVersion && gameVersion !== 'Any') params.game_versions = gameVersion;
+            if (loader && loader !== 'Any') params.loaders = JSON.stringify([loader.toLowerCase()]);
+            if (gameVersion && gameVersion !== 'Any') params.game_versions = JSON.stringify([gameVersion]);
 
             const response = await axios.get(`${this.baseUrl}/project/${id}/version`, {
                 params,

@@ -124,6 +124,54 @@ async function runInstaller(url: string, destPath: string, mcPath: string, event
   });
 }
 
+// FIX: Automatic fix for AMD driver crash by disabling NeoForge early window
+function fixNeoForgeConfig(mcPath: string) {
+  const configDir = path.join(mcPath, 'config');
+  if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+
+  const files = ['fml.toml', 'neoforge-client.toml'];
+  for (const file of files) {
+    const filePath = path.join(configDir, file);
+    try {
+      const sectionHeader = '[earlyWindow]';
+      const newKeys = [
+        '    earlyWindowControl = false',
+        '    earlyWindowSkipGLVersions = ["4.6", "4.5"]',
+        '    earlyWindowParallelism = 1'
+      ];
+
+      let lines: string[] = [];
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        // Split by line and filter out existing problematic keys
+        lines = content.split(/\r?\n/).filter(line => {
+          const trimmed = line.trim();
+          return !trimmed.startsWith('earlyWindowControl') &&
+            !trimmed.startsWith('earlyWindowSkipGLVersions') &&
+            !trimmed.startsWith('earlyWindowParallelism');
+        });
+
+        const sectionIndex = lines.findIndex(l => l.trim() === sectionHeader);
+        if (sectionIndex !== -1) {
+          // Insert after [earlyWindow]
+          lines.splice(sectionIndex + 1, 0, ...newKeys);
+        } else {
+          // Prepend section at top
+          lines.unshift(sectionHeader, ...newKeys, '');
+        }
+      } else {
+        lines = [sectionHeader, ...newKeys];
+      }
+
+      // Join with \n (Node write handles OS conversion usually, but \n is safe for TOML)
+      fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+      console.log(`[NeoForgeFix] Patched ${file} (Line-by-Line Safe Mode).`);
+    } catch (e) {
+      console.error(`[NeoForgeFix] Failed to patch ${file}:`, e);
+    }
+  }
+}
+
 // FIX: Helper to resolve NeoForge placeholders that MCLC 3.x fails to handle
 // AND inject necessary JVM arguments for modern Java
 function fixVersionJson(versionsPath: string, versionId: string, mcPath: string) {
@@ -591,7 +639,7 @@ app.whenReady().then(() => {
       if (mainWindow) {
         mainWindow.webContents.send('sync:progress', { instanceId: args.modpackName, ...progress });
       }
-    });
+    }, args.token, args.rootPath);
   });
 
   ipcMain.handle('sync:cancel', (_, instanceId) => {
@@ -600,11 +648,11 @@ app.whenReady().then(() => {
 
 
 
-  ipcMain.handle('sync:start', async (event, instanceId: string, manifest: any, token?: string) => {
+  ipcMain.handle('sync:start', async (event, instanceId: string, manifest: any, token?: string, rootPath?: string) => {
     try {
       await syncService.startSync(instanceId, manifest, (progress) => {
         event.sender.send('sync:progress', progress);
-      }, token);
+      }, token, rootPath);
       return { success: true };
     } catch (error: any) {
       console.error('Sync failed:', error);
@@ -638,9 +686,13 @@ app.whenReady().then(() => {
     };
 
     try {
-      sendStatus('Syncing mods...', 5);
-      const syncResult = await syncModpackFiles(_event, options);
-      if (!syncResult.success) return sendError(syncResult.error);
+      if (!options.skipSync) {
+        sendStatus('Syncing mods...', 5);
+        const syncResult = await syncModpackFiles(_event, options);
+        if (!syncResult.success) return sendError(syncResult.error);
+      } else {
+        sendStatus('Verifying installation...', 5);
+      }
 
       // ENSURE JAVA
       const reqJava = getJavaVersion(options.gameVersion);
@@ -686,30 +738,37 @@ app.whenReady().then(() => {
       } else if (options.loaderType === 'neoforge') {
         sendStatus('Installing NeoForge...', 60);
         try {
-          // NeoForge versioning:
-          // - For 1.20.x: "1.20.1-47.1.104"
-          // - For 1.21.x: "21.1.65"
-          const metadataUrl = 'https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml';
-          const metaResp = await axios.get(metadataUrl, { timeout: 15000 });
-          const xml = metaResp.data;
-          const versionMatches: string[] = Array.from(xml.matchAll(/<version>(.*?)<\/version>/g)).map((m: any) => m[1]);
-
           const gameVer = options.gameVersion;
-          const gParts = gameVer.split('.');
-          const minorMC = parseInt(gParts[1]);
-          const patchMC = gParts[2] || '0';
+          let latestNeo = options.loaderVersion;
 
-          let validVersions: string[] = [];
-          if (minorMC >= 21) {
-            const prefix = `${minorMC}.${patchMC}.`;
-            validVersions = versionMatches.filter(v => v.startsWith(prefix));
-          } else {
-            const prefix = `${gameVer}-`;
-            validVersions = versionMatches.filter(v => v.startsWith(prefix));
+          // Only fetch metadata if we don't have a specific version or it's 'latest'
+          if (!latestNeo || latestNeo === 'latest') {
+            try {
+              const metadataUrl = 'https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml';
+              const metaResp = await axios.get(metadataUrl, { timeout: 15000 });
+              const xml = metaResp.data;
+              const versionMatches: string[] = Array.from(xml.matchAll(/<version>(.*?)<\/version>/g)).map((m: any) => m[1]);
+
+              const gParts = gameVer.split('.');
+              const minorMC = parseInt(gParts[1]);
+              const patchMC = gParts[2] || '0';
+
+              let validVersions: string[] = [];
+              if (minorMC >= 21) {
+                const prefix = `${minorMC}.${patchMC}.`;
+                validVersions = versionMatches.filter(v => v.startsWith(prefix));
+              } else {
+                const prefix = `${gameVer}-`;
+                validVersions = versionMatches.filter(v => v.startsWith(prefix));
+              }
+
+              validVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+              latestNeo = validVersions[validVersions.length - 1]; // Get last (latest)
+            } catch (metaErr: any) {
+              console.warn('[NEOFORGE] Metadata fetch failed, but we might be able to proceed if a specific version was intended.', metaErr);
+              throw new Error(`Failed to fetch NeoForge version list (Server returned ${metaErr.response?.status || 'Error'}). If you can, go to Settings and select a specific NeoForge version instead of 'latest'.`);
+            }
           }
-
-          validVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-          const latestNeo = validVersions[validVersions.length - 1]; // Get last (latest)
 
           if (!latestNeo) throw new Error(`Could not find NeoForge version for ${gameVer}`);
 
@@ -797,7 +856,6 @@ app.whenReady().then(() => {
       }
 
       // FIX: Add JVM options for modern Java (17+) if needed
-      // We explicitly construct NeoForge arguments here because modifying version.json isn't reliable with MCLC
       if (!options.customArgs) options.customArgs = [];
       const JVM_OPTIONS = [
         '-XX:+UnlockExperimentalVMOptions',
@@ -807,7 +865,49 @@ app.whenReady().then(() => {
         '-XX:MaxGCPauseMillis=50',
         '-XX:G1HeapRegionSize=32M'
       ];
+
+      // APPLY AMD/INTEL FIXES ONLY IF ENABLED
+      if (options.amdCompatibility) {
+        logToFile('[AMD] Compatibility mode enabled. Applying fixes...');
+
+        // 1. Branding arguments & NeoForge Master Properties
+        JVM_OPTIONS.push(
+          '-Dminecraft.launcher.brand=minecraft-launcher',
+          '-Dminecraft.launcher.version=2.1.0',
+          '-Dneoforge.fml.earlyWindowControl=false',
+          '-Dneoforge.earlywindow=false',
+          '-Dneoforge.immediateWindow=false',
+          '-Dneoforge.loading.window=false'
+        );
+
+        // 2. Threaded optimizations (Mostly NVIDIA, but doesn't hurt)
+        process.env.__GL_THREADED_OPTIMIZATIONS = '1';
+
+        // 3. Config patching (Disable Early Window & Skip GL 4.6/4.5)
+        if (options.loaderType === 'neoforge' && options.gameVersion.includes('1.21')) {
+          fixNeoForgeConfig(mcPath);
+        }
+
+        // 4. Executable Spoofing (Windows only)
+        if (process.platform === 'win32' && options.javaPath) {
+          try {
+            const javaDir = path.dirname(options.javaPath);
+            const spoofedPath = path.join(javaDir, 'Minecraft.exe');
+            if (!fs.existsSync(spoofedPath)) {
+              fs.copyFileSync(options.javaPath, spoofedPath);
+              logToFile(`[AMD] Created spoofed executable: ${spoofedPath}`);
+            }
+            options.javaPath = spoofedPath;
+            logToFile(`[AMD] Using spoofed Java path: ${options.javaPath}`);
+          } catch (e) {
+            logToFile(`[AMD-ERR] Failed to spoof executable: ${e}`);
+          }
+        }
+      }
+
       options.customArgs.push(...JVM_OPTIONS);
+      logToFile(`[LAUNCH] Final JVM Args count: ${options.customArgs.length}`);
+      logToFile(`[LAUNCH] Java Path: ${options.javaPath}`);
 
       // NeoForge / Modern Forge specific logic
       if (options.loaderType === 'neoforge' || (options.loaderType === 'forge' && parseInt(options.gameVersion.split('.')[1]) >= 17)) {

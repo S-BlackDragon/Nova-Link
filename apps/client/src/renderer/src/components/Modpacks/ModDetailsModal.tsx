@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { X, Download, ExternalLink, Calendar, User, DownloadCloud, Info, History, Image as ImageIcon, Layers, Loader2, Check, Tag, Link as LinkIcon, FileText, Globe, AlertCircle, ChevronDown } from 'lucide-react';
+import { X, Download, ExternalLink, Calendar, User, DownloadCloud, Info, History, Image as ImageIcon, Layers, Loader2, Check, Tag, Link as LinkIcon, FileText, Globe, AlertCircle, ChevronDown, Plus } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
 
 interface ModDetailsModalProps {
@@ -11,12 +11,13 @@ interface ModDetailsModalProps {
     gameVersion?: string;
     loader?: string;
     onClose: () => void;
+    canEdit?: boolean;
     onAddMod?: (mod: any, versionId: string) => void;
 }
 
 type Tab = 'overview' | 'versions' | 'changelog' | 'gallery';
 
-export default function ModDetailsModal({ projectId, gameVersion, loader, onClose, onAddMod }: ModDetailsModalProps) {
+export default function ModDetailsModal({ projectId, gameVersion, loader, onClose, canEdit = true, onAddMod }: ModDetailsModalProps) {
     const [project, setProject] = useState<any>(null);
     const [versions, setVersions] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -24,9 +25,21 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
     const [selectedVersion, setSelectedVersion] = useState<any>(null);
     const [activeTab, setActiveTab] = useState<Tab>('overview');
     const [adding, setAdding] = useState(false);
+    const [showWarning, setShowWarning] = useState(false);
+    const [pendingVersion, setPendingVersion] = useState<any>(null);
 
     const [internalGameVersion, setInternalGameVersion] = useState(gameVersion || 'Any');
     const [internalLoader, setInternalLoader] = useState(loader || 'Any');
+
+    const filteredVersions = useMemo(() => {
+        return versions.filter(v => {
+            const hasLoader = internalLoader === 'Any' || (v.loaders && v.loaders.some(l => l.toLowerCase() === internalLoader.toLowerCase()));
+            const hasGameVersion = internalGameVersion === 'Any' || (v.game_versions && v.game_versions.some(gv =>
+                gv === internalGameVersion || gv.startsWith(internalGameVersion + '.')
+            ));
+            return hasLoader && hasGameVersion;
+        });
+    }, [versions, internalGameVersion, internalLoader]);
 
     // Fetch project details once
     useEffect(() => {
@@ -49,12 +62,7 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
         const fetchVersions = async () => {
             setLoadingVersions(true);
             try {
-                const versRes = await axios.get(`${API_BASE_URL}/modrinth/project/${projectId}/versions`, {
-                    params: {
-                        gameVersion: internalGameVersion === 'Any' ? undefined : internalGameVersion,
-                        loader: internalLoader === 'Any' ? undefined : internalLoader
-                    }
-                });
+                const versRes = await axios.get(`${API_BASE_URL}/modrinth/project/${projectId}/versions`);
                 const sortedVersions = versRes.data.sort((a: any, b: any) =>
                     new Date(b.date_published).getTime() - new Date(a.date_published).getTime()
                 );
@@ -78,11 +86,58 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
         }
     }, [projectId, internalGameVersion, internalLoader]);
 
-    const handleAdd = async (v: any) => {
+    const checkCompatibility = (vers: any) => {
+        const results = {
+            loader: true as boolean | 'warn',
+            gameVersion: true as boolean | 'warn'
+        };
+
+        // 1. Loader Check
+        if (loader && loader !== 'Any') {
+            const normalizedLoader = loader.toLowerCase();
+            const versionSupports = vers?.loaders?.map((l: string) => l.toLowerCase()) || [];
+
+            // A version MUST support the loader. The project-level loaders are just an aggregate.
+            const isCompatible = versionSupports.includes(normalizedLoader);
+
+            if (!isCompatible) {
+                // Special case: "forge" and "neoforge" are often interchangeable
+                if (normalizedLoader === 'neoforge' && versionSupports.includes('forge')) {
+                    results.loader = 'warn';
+                } else if (normalizedLoader === 'forge' && versionSupports.includes('neoforge')) {
+                    results.loader = 'warn';
+                } else {
+                    results.loader = false;
+                }
+            }
+        }
+
+        // 2. Game Version Check
+        if (gameVersion && gameVersion !== 'Any') {
+            const versionSupports = vers?.game_versions || [];
+            if (!versionSupports.includes(gameVersion)) {
+                results.gameVersion = 'warn'; // Game version mismatch is almost always a warning (might work, might not)
+            }
+        }
+
+        return results;
+    };
+
+    const handleAdd = async (v: any, force: boolean = false) => {
         if (!onAddMod) return;
+
+        const compatibility = checkCompatibility(v);
+        if ((compatibility.loader !== true || compatibility.gameVersion !== true) && !force) {
+            setPendingVersion(v);
+            setShowWarning(true);
+            return;
+        }
+
         setAdding(true);
         try {
             await onAddMod(project, v.id);
+            setShowWarning(false);
+            setPendingVersion(null);
         } finally {
             setAdding(false);
         }
@@ -166,15 +221,40 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                         )}
                     </div>
 
-                    {selectedVersion && (
-                        <button
-                            onClick={() => handleAdd(selectedVersion)}
-                            disabled={adding}
-                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button mb-1 mt-1"
-                        >
-                            {adding ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                            {adding ? 'Adding...' : `Add Latest (${selectedVersion.version_number})`}
-                        </button>
+                    {selectedVersion && canEdit && (
+                        project.project_type === 'modpack' ? (
+                            <div className="flex items-center gap-4">
+                                <span className="text-amber-500 font-bold text-sm bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20">
+                                    Modpacks cannot be added to other modpacks
+                                </span>
+                                <button
+                                    onClick={() => {
+                                        onClose();
+                                        window.dispatchEvent(new CustomEvent('open-modpack-creator', {
+                                            detail: {
+                                                name: project.title,
+                                                description: project.description,
+                                                gameVersion: selectedVersion.game_versions[0],
+                                                loader: selectedVersion.loaders[0]
+                                            }
+                                        }));
+                                    }}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button"
+                                >
+                                    <Plus className="w-5 h-5" />
+                                    Import as New Modpack
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => handleAdd(selectedVersion)}
+                                disabled={adding}
+                                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button mb-1 mt-1"
+                            >
+                                {adding ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                                {adding ? 'Adding...' : `Add Latest (${selectedVersion.version_number})`}
+                            </button>
+                        )
                     )}
                 </div>
 
@@ -251,9 +331,9 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                                     className="bg-slate-950/50 border border-white/10 text-white text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500/50 transition-all min-w-[140px] appearance-none cursor-pointer hover:border-white/20"
                                                 >
                                                     <option value="Any">Any Loader</option>
-                                                    {[...(project.loaders || [])].sort().map((l: string) => (
+                                                    {['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((l: string) => (
                                                         <option key={l} value={l} className="capitalize">
-                                                            {l.charAt(0).toUpperCase() + l.slice(1)}
+                                                            {l}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -268,48 +348,68 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                         <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-6" />
                                         <p className="text-slate-500 font-bold text-2xl animate-pulse">Fetching compatible versions...</p>
                                     </div>
-                                ) : versions.length > 0 ? (
+                                ) : filteredVersions.length > 0 ? (
                                     <div className="space-y-4">
-                                        {versions.map((v: any) => (
-                                            <div
-                                                key={v.id}
-                                                className={`p-6 rounded-[2rem] border transition-all group flex items-center justify-between ${selectedVersion?.id === v.id ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/[0.02] border-white/5 hover:bg-white/5 hover:border-white/10'}`}
-                                            >
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-3 mb-1">
-                                                        <h4 className="text-xl font-black text-white">{v.name}</h4>
-                                                        <span className="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                                                            {v.version_number}
-                                                        </span>
+                                        {filteredVersions.map((v: any) => {
+                                            const compat = checkCompatibility(v);
+                                            const isWarn = compat.loader === 'warn' || compat.gameVersion === 'warn';
+                                            const isIncompat = compat.loader === false || compat.gameVersion === false;
+
+                                            return (
+                                                <div
+                                                    key={v.id}
+                                                    className={`p-6 rounded-[2rem] border transition-all group flex items-center justify-between ${selectedVersion?.id === v.id ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/[0.02] border-white/5 hover:bg-white/5 hover:border-white/10'}`}
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-3 mb-1">
+                                                            <h4 className="text-xl font-black text-white">{v.name}</h4>
+                                                            <span className="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                                                                {v.version_number}
+                                                            </span>
+                                                            {isWarn && (
+                                                                <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[9px] font-black rounded uppercase">
+                                                                    <AlertCircle className="w-3 h-3" /> Potential Issue
+                                                                </span>
+                                                            )}
+                                                            {isIncompat && (
+                                                                <span className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 text-red-500 text-[9px] font-black rounded uppercase">
+                                                                    <X className="w-3 h-3" /> Incompatible
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-4 text-sm text-slate-500 font-bold">
+                                                            <span className="flex items-center gap-1"><Layers className="w-4 h-4" /> {v.game_versions.join(', ')}</span>
+                                                            <span className="flex items-center gap-1"><Download className="w-4 h-4 text-emerald-500" /> {v.loaders.join(', ')}</span>
+                                                        </div>
                                                     </div>
-                                                    <div className="flex items-center gap-4 text-sm text-slate-500 font-bold">
-                                                        <span className="flex items-center gap-1"><Layers className="w-4 h-4" /> {v.game_versions.join(', ')}</span>
-                                                        <span className="flex items-center gap-1"><Download className="w-4 h-4 text-emerald-500" /> {v.loaders.join(', ')}</span>
+                                                    <div className="flex items-center gap-3">
+                                                        {canEdit && (
+                                                            <button
+                                                                onClick={() => handleAdd(v)}
+                                                                disabled={isIncompat}
+                                                                className={`px-6 py-3 rounded-2xl font-black text-sm transition-all ${isIncompat ? 'bg-red-500/10 text-red-500 cursor-not-allowed opacity-50' : selectedVersion?.id === v.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                                                                title={isIncompat ? 'This version is incompatible with your modpack' : undefined}
+                                                            >
+                                                                {isIncompat ? 'Blocked' : selectedVersion?.id === v.id ? <Check className="w-5 h-5" /> : 'Select'}
+                                                            </button>
+                                                        )}
+                                                        <a
+                                                            href={`https://modrinth.com/mod/${project.slug}/version/${v.id}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="p-3 bg-white/5 text-slate-500 rounded-2xl hover:text-white hover:bg-white/10 transition-all shadow-xl"
+                                                        >
+                                                            <ExternalLink className="w-5 h-5" />
+                                                        </a>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
-                                                    <button
-                                                        onClick={() => setSelectedVersion(v)}
-                                                        className={`px-6 py-3 rounded-2xl font-black text-sm transition-all ${selectedVersion?.id === v.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                                                    >
-                                                        {selectedVersion?.id === v.id ? <Check className="w-5 h-5" /> : 'Select'}
-                                                    </button>
-                                                    <a
-                                                        href={`https://modrinth.com/mod/${project.slug}/version/${v.id}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="p-3 bg-white/5 text-slate-500 rounded-2xl hover:text-white hover:bg-white/10 transition-all shadow-xl"
-                                                    >
-                                                        <ExternalLink className="w-5 h-5" />
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="text-center py-24 bg-white/[0.01] rounded-[3rem] border border-dashed border-white/10">
                                         <DownloadCloud className="w-20 h-20 text-slate-800 mx-auto mb-6" />
-                                        <p className="text-slate-500 font-bold text-2xl">No compatible versions found.</p>
+                                        <p className="text-slate-500 font-bold text-2xl">No versions match current filters.</p>
                                         <button
                                             onClick={() => {
                                                 setInternalGameVersion('Any');
@@ -317,7 +417,7 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                             }}
                                             className="mt-6 text-emerald-500 font-black uppercase tracking-widest text-xs hover:underline"
                                         >
-                                            Reset Filters
+                                            Show All Versions
                                         </button>
                                     </div>
                                 )}
@@ -443,6 +543,97 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                     </div>
                 </div>
             </div>
+
+            {/* Warning Dialog */}
+            {showWarning && pendingVersion && (
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+                    <div className="bg-slate-900 border border-white/10 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+                        <div className="p-8 text-center">
+                            <div className="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <AlertCircle className="w-10 h-10 text-amber-500" />
+                            </div>
+                            <h3 className="text-2xl font-black text-white mb-2">Compatibility Warning</h3>
+                            <div className="space-y-4 mb-8">
+                                <p className="text-slate-400 font-medium">
+                                    This version might not be fully compatible with your modpack:
+                                </p>
+                                <div className="bg-white/5 rounded-2xl p-4 text-left space-y-2">
+                                    {checkCompatibility(pendingVersion).loader === 'warn' && (
+                                        <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
+                                            <Tag className="w-4 h-4" />
+                                            <span>Loader mismatch (Forge/NeoForge)</span>
+                                        </div>
+                                    )}
+                                    {checkCompatibility(pendingVersion).loader === false && (
+                                        <div className="flex items-center gap-2 text-red-500 text-sm font-bold">
+                                            <X className="w-4 h-4" />
+                                            <span>Incompatible Loader</span>
+                                        </div>
+                                    )}
+                                    {checkCompatibility(pendingVersion).gameVersion === 'warn' && (
+                                        <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
+                                            <Layers className="w-4 h-4" />
+                                            <span>Game version mismatch ({gameVersion} vs {pendingVersion.game_versions.join(', ')})</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex flex-col gap-3">
+                                {(() => {
+                                    const compatible = versions.find(v => {
+                                        const comp = checkCompatibility(v);
+                                        return comp.loader === true && comp.gameVersion === true;
+                                    });
+                                    if (compatible && compatible.id !== pendingVersion.id) {
+                                        return (
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedVersion(compatible);
+                                                    setShowWarning(false);
+                                                    setPendingVersion(null);
+                                                }}
+                                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl transition-all shadow-lg active:scale-95"
+                                            >
+                                                Switch to Compatible ({compatible.version_number})
+                                            </button>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+                                {(() => {
+                                    const compat = checkCompatibility(pendingVersion);
+                                    if (compat.loader === false) {
+                                        return (
+                                            <div className="bg-red-500/10 p-4 rounded-xl border border-red-500/20 mb-4">
+                                                <p className="text-red-500 text-sm font-bold">
+                                                    CRITICAL: This mod is for a different loader ({pendingVersion.loaders.join(', ')}) and WILL NOT work.
+                                                </p>
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <button
+                                            onClick={() => handleAdd(pendingVersion, true)}
+                                            className="w-full bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white font-black py-4 rounded-2xl transition-all border border-emerald-500/20 active:scale-95"
+                                        >
+                                            Install Anyway
+                                        </button>
+                                    );
+                                })()}
+                                <button
+                                    onClick={() => {
+                                        setShowWarning(false);
+                                        setPendingVersion(null);
+                                    }}
+                                    className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-2xl transition-all"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

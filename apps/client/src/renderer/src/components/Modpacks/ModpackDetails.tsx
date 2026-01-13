@@ -38,7 +38,9 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
     const fetchDetails = async () => {
         setLoading(true);
         try {
-            const response = await axios.get(`${API_BASE_URL}/modpacks/${modpackId}`);
+            const response = await axios.get(`${API_BASE_URL}/modpacks/${modpackId}`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
             setModpack(response.data);
             await Promise.all([
                 fetchDiskFiles(response.data, activeContentType),
@@ -84,7 +86,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         }
     };
 
-
     useEffect(() => {
         fetchDetails();
     }, [modpackId]);
@@ -104,16 +105,13 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         try {
             const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
             const rootPath = settings.mcPath || 'C:\\Minecraft';
-
             const token = localStorage.getItem('token');
-            await (window as any).api.syncModpack({
-                versionId: currentVersion.id,
-                modpackName: modpack.name,
-                rootPath,
-                gameVersion: currentVersion.gameVersion,
-                loaderType: currentVersion.loaderType,
-                token // Pass token to main process
+
+            const manifestResponse = await axios.get(`${API_BASE_URL}/sync/manifest/${currentVersion.id}`, {
+                headers: { Authorization: `Bearer ${token}` }
             });
+
+            await (window as any).api.sync.start(modpack.name, manifestResponse.data, token || undefined, rootPath);
             await fetchDetails();
         } catch (err) {
             console.error('Sync failed:', err);
@@ -125,7 +123,9 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     const handleRemoveMod = async (modId: string) => {
         try {
-            await axios.delete(`${API_BASE_URL}/modpacks/mods/${modId}`);
+            await axios.delete(`${API_BASE_URL}/modpacks/mods/${modId}`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
             fetchDetails();
         } catch (err) {
             console.error('Failed to remove mod:', err);
@@ -137,7 +137,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
             const rootPath = settings.mcPath || 'C:\\Minecraft';
 
-            // Toggle the physical file
             const result = await (window as any).api.toggleModFile({
                 rootPath,
                 modpackName: modpack.name,
@@ -146,13 +145,13 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             });
 
             if (result.success) {
-                // Update API if it's a tracked mod
                 if (mod.id && !mod.isExternal) {
                     await axios.patch(`${API_BASE_URL}/modpacks/mods/${mod.id}`, {
                         enabled: !currentStatus
+                    }, {
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                     });
                 }
-                // Refresh the disk files
                 await fetchDiskFiles(modpack, activeContentType);
             } else {
                 console.error('Failed to toggle mod file:', result.error);
@@ -164,34 +163,28 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     const currentVersion = modpack?.versions?.[0];
     const mods = currentVersion?.mods || [];
-    // Content listing logic:
-    // Filter DB mods by current active content type
     const dbMods = mods.filter((m: any) => m.projectType === activeContentType);
-
-    // Merged listing: Combine DB mods and Disk files
     const diskMap = new Map(diskFiles.map(f => [f.replace('.disabled', '').toLowerCase(), f]));
 
-    // Start with all DB mods
     const mergedContent = dbMods.map((dbMod: any) => {
         const cleanName = dbMod.filename || `${dbMod.name}.jar`;
         const diskFile = diskMap.get(cleanName.toLowerCase());
         const isDisabled = diskFile?.endsWith('.disabled');
 
-        if (diskFile) diskMap.delete(cleanName.toLowerCase()); // Remove from diskMap so we can handle externals later
+        if (diskFile) diskMap.delete(cleanName.toLowerCase());
 
         return {
             id: dbMod.id,
             name: dbMod.name,
             iconUrl: dbMod.iconUrl,
             modrinthId: dbMod.modrinthId,
-            enabled: diskFile ? !isDisabled : true, // Default to true if not on disk yet
+            enabled: diskFile ? !isDisabled : true,
             isExternal: false,
             filename: diskFile || cleanName,
             onDisk: !!diskFile
         };
     });
 
-    // Add remaining disk files as external
     diskMap.forEach((filename) => {
         const isDisabled = filename.endsWith('.disabled');
         mergedContent.push({
@@ -206,7 +199,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         });
     });
 
-    // Filter content
     const filteredContent = mergedContent.filter((mod: any) =>
         mod.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (mod.modrinthId && mod.modrinthId.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -227,14 +219,12 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
         const rootBase = settings.mcPath;
 
-        // 1. Check Path
         if (!rootBase || rootBase.trim() === '') {
             playNotification('warning');
             setPathNotification(true);
             return;
         }
 
-        // 2. Check Auth
         const storedAuth = localStorage.getItem('ms_auth');
         const storedProfile = localStorage.getItem('ms_profile');
         if (!settings.offlineMode && (!storedAuth || !storedProfile)) {
@@ -243,12 +233,10 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             return;
         }
 
-        // 3. Start Sync Process
         setShowSyncModal(true);
         setSyncState({ status: 'scanning', progress: 0 });
 
         try {
-            // Fetch Manifest
             const token = localStorage.getItem('token');
             let manifest;
             try {
@@ -258,15 +246,10 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 manifest = response.data;
             } catch (err: any) {
                 console.error('Manifest fetch failed:', err);
-                const status = err.response?.status;
-                const targetUrl = `${API_BASE_URL}/sync/manifest/${currentVersion.id}`;
-                throw new Error(`Failed to fetch manifest (${status || 'Network Error'}). Target: ${targetUrl}. Are you online?`);
+                throw new Error(`Failed to fetch manifest. Are you online?`);
             }
 
-            // Start Sync
-            const instanceId = modpack.name; // Using name as ID for simple file paths
-
-            // Subscribe to progress
+            const instanceId = modpack.name;
             const unsubscribe = (window as any).api.sync.onProgress((p: any) => {
                 setSyncState({
                     status: p.status,
@@ -275,24 +258,18 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 });
             });
 
-            await (window as any).api.sync.start(instanceId, manifest, token);
-
+            await (window as any).api.sync.start(instanceId, manifest, token, rootBase);
             unsubscribe();
             setSyncState({ status: 'completed', progress: 100 });
 
-            // Wait a moment for visual completion
             await new Promise(r => setTimeout(r, 1000));
             setShowSyncModal(false);
 
-            // 4. Launch Game
             setLaunchingInfo({ id: modpackId, launching: true });
             setLocalLaunching(true);
-            setActiveTab('logs'); // Auto switch to logs
+            setActiveTab('logs');
 
-            // Determine Auth Logic
             let auth = { name: 'Player' };
-
-            // Only use real auth if Offline Mode is visibly DISABLED
             if (!settings.offlineMode && storedAuth && storedProfile) {
                 try {
                     const parsedAuth = JSON.parse(storedAuth);
@@ -315,7 +292,10 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 modpackName: modpack.name,
                 rootPath: rootBase,
                 memory: settings.maxMemory || '4G',
-                auth: auth
+                auth: auth,
+                amdCompatibility: settings.amdCompatibility,
+                skipSync: true,
+                token: localStorage.getItem('token')
             };
 
             const result = await (window as any).api.launchMinecraft(options);
@@ -327,7 +307,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         } catch (err: any) {
             console.error('Launch sequence failed:', err);
             setSyncState(prev => ({ ...prev, status: 'error', error: err.message || 'Unknown error' }));
-            // Don't close modal on error, let user see it
         }
     };
 
@@ -350,9 +329,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             const safeName = modpack.name.replace(/[^a-zA-Z0-9-]/g, '_');
             const folderPath = `${rootBase}\\instances\\${safeName}`;
 
-            // Ensure it exists first
             await (window as any).api.createInstance({ rootPath: rootBase, modpackName: modpack.name });
-            // Open it
             await (window as any).api.openFolder(folderPath);
         } catch (err) {
             console.error('Failed to open folder:', err);
@@ -453,13 +430,15 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         <Package className="w-5 h-5" />
                         Installed
                     </button>
-                    <button
-                        onClick={() => setActiveTab('search')}
-                        className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'search' ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <Search className="w-5 h-5" />
-                        Add Content
-                    </button>
+                    {modpack.canEdit && (
+                        <button
+                            onClick={() => setActiveTab('search')}
+                            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'search' ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
+                        >
+                            <Search className="w-5 h-5" />
+                            Add Content
+                        </button>
+                    )}
                     <button
                         onClick={() => setActiveTab('logs')}
                         className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'logs' ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
@@ -478,9 +457,8 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                     </div>
                 )}
 
-                {/* Content */}
+                {/* Content Area */}
                 <div className="flex-1 overflow-hidden relative">
-                    {/* Content Tab */}
                     {activeTab === 'content' && (
                         <div className="absolute inset-0 overflow-y-auto p-10 space-y-6 custom-scrollbar">
                             <div className="flex items-center gap-4 mb-8">
@@ -541,38 +519,41 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-4">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleToggleMod(mod, mod.enabled ?? true);
-                                                    }}
-                                                    className={`p-4 rounded-2xl transition-all shadow-xl ${mod.enabled === false ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white'}`}
-                                                    title={mod.enabled === false ? "Enable" : "Disable"}
-                                                >
-                                                    {mod.enabled === false ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                                </button>
-
-                                                {/* Mod Info Button */}
-                                                {mod.modrinthId && (
+                                                {modpack.canEdit && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            setDetailedModId(mod.modrinthId);
+                                                            handleToggleMod(mod, mod.enabled ?? true);
                                                         }}
-                                                        className="p-4 bg-blue-500/10 text-blue-500 rounded-2xl hover:bg-blue-500 hover:text-white transition-all shadow-xl"
-                                                        title="View mod details"
+                                                        className={`p-4 rounded-2xl transition-all shadow-xl ${mod.enabled === false ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white'}`}
+                                                        title={mod.enabled === false ? "Enable" : "Disable"}
                                                     >
-                                                        <Info className="w-5 h-5" />
+                                                        {mod.enabled === false ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                                     </button>
                                                 )}
 
-                                                {!mod.isExternal && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (mod.modrinthId) {
+                                                            setDetailedModId(mod.modrinthId);
+                                                        }
+                                                    }}
+                                                    className={`p-4 rounded-2xl transition-all shadow-xl ${mod.modrinthId ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500 hover:text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                                                    title={mod.modrinthId ? "View mod details" : "External mod - no details available"}
+                                                    disabled={!mod.modrinthId}
+                                                >
+                                                    <Info className="w-5 h-5" />
+                                                </button>
+
+                                                {modpack.canEdit && !mod.isExternal && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             handleRemoveMod(mod.id);
                                                         }}
-                                                        className="p-4 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all opacity-0 group-hover:opacity-100 shadow-xl"
+                                                        className="p-4 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-xl"
+                                                        title="Remove from modpack"
                                                     >
                                                         <Trash2 className="w-5 h-5" />
                                                     </button>
@@ -590,7 +571,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         </div>
                     )}
 
-                    {/* Search Tab */}
                     {activeTab === 'search' && (
                         <div className="absolute inset-0 overflow-hidden">
                             <ModSearch
@@ -599,11 +579,14 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                 fixedFilters={true}
                                 onAddMod={async (mod) => {
                                     try {
+                                        const token = localStorage.getItem('token');
                                         await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
-                                            modrinthId: mod.project_id || mod.slug,
+                                            modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
                                             name: mod.title,
                                             iconUrl: mod.icon_url,
                                             versionId: mod.versionId || null
+                                        }, {
+                                            headers: { Authorization: `Bearer ${token}` }
                                         });
                                         await handleSync();
                                         fetchDetails();
@@ -616,7 +599,6 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         </div>
                     )}
 
-                    {/* Logs Tab */}
                     {activeTab === 'logs' && (
                         <div className="absolute inset-0 bg-black">
                             <LauncherConsole isEmbedded={true} />
@@ -625,7 +607,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                 </div>
             </div>
 
-            {/* Notifications Overlay */}
+            {/* Overlays */}
             {(pathNotification || authNotification) && (
                 <div className="absolute top-10 right-10 z-[200] flex flex-col gap-4 animate-in slide-in-from-right duration-300">
                     {pathNotification && (
@@ -643,7 +625,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                     onClick={() => {
                                         setPathNotification(false);
                                         const event = new CustomEvent('navigate-settings');
-                                        window.dispatchEvent(event); // Dashboard needs to listen to this
+                                        window.dispatchEvent(event);
                                     }}
                                     className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-sm"
                                 >
@@ -705,6 +687,24 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                     gameVersion={currentVersion?.gameVersion}
                     loader={currentVersion?.loaderType}
                     onClose={() => setDetailedModId(null)}
+                    canEdit={modpack.canEdit}
+                    onAddMod={async (project, versionId) => {
+                        try {
+                            const token = localStorage.getItem('token');
+                            await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
+                                modrinthId: project.id,
+                                name: project.title,
+                                iconUrl: project.icon_url,
+                                versionId: versionId
+                            }, {
+                                headers: { Authorization: `Bearer ${token}` }
+                            });
+                            await handleSync();
+                            fetchDetails();
+                        } catch (e) {
+                            console.error(e);
+                        }
+                    }}
                 />
             )}
         </div>

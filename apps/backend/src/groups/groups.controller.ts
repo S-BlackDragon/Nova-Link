@@ -38,6 +38,11 @@ export class GroupsController {
     return this.groupsService.leaveGroup(req.user.id, id);
   }
 
+  @Post(':id/transfer')
+  transferOwnership(@Req() req: any, @Param('id') id: string, @Body() body: { newOwnerId: string }) {
+    return this.groupsService.transferOwnership(req.user.id, id, body.newOwnerId);
+  }
+
   @Delete(':id/members/:userId')
   removeMember(@Req() req: any, @Param('id') groupId: string, @Param('userId') userId: string) {
     return this.groupsService.removeMember(req.user.id, groupId, userId);

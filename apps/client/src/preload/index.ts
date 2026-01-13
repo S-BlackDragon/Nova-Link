@@ -13,7 +13,7 @@ const api = {
   onLaunchRunning: (callback: any) => electronAPI.ipcRenderer.on('launch-running', callback),
   deleteInstance: (options: any) => electronAPI.ipcRenderer.invoke('delete-instance', options),
   createInstance: (options: any) => electronAPI.ipcRenderer.invoke('create-instance', options),
-  syncModpack: (options: any) => electronAPI.ipcRenderer.invoke('sync-modpack', options),
+  syncModpack: (options: any) => electronAPI.ipcRenderer.invoke('sync:modpack', options),
   stopInstance: (modpackName: string) => electronAPI.ipcRenderer.invoke('stop-instance', modpackName),
   isInstanceRunning: (modpackName: string) => electronAPI.ipcRenderer.invoke('is-instance-running', modpackName),
   openFolder: (path: string) => electronAPI.ipcRenderer.invoke('open-folder', path),
@@ -22,7 +22,7 @@ const api = {
 
   // Sync API
   sync: {
-    start: (instanceId: string, manifest: any, token?: string) => electronAPI.ipcRenderer.invoke('sync:start', instanceId, manifest, token),
+    start: (instanceId: string, manifest: any, token?: string, rootPath?: string) => electronAPI.ipcRenderer.invoke('sync:start', instanceId, manifest, token, rootPath),
     onProgress: (callback: (progress: any) => void) => {
       const handler = (_event: any, progress: any) => callback(progress);
       electronAPI.ipcRenderer.on('sync:progress', handler);

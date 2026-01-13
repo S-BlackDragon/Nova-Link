@@ -142,7 +142,7 @@ export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVer
 
             const versionId = modpack.versions[0].id;
             await axios.post(`${API_BASE_URL}/modpacks/versions/${versionId}/mods`, {
-                modrinthId: mod.project_id || mod.slug,
+                modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
                 versionId: selectedModVersion || null,
@@ -181,7 +181,7 @@ export default function ModpackSelectorDialog({ mod, gameVersion: initialGameVer
 
             // Add mod to the new modpack
             await axios.post(`${API_BASE_URL}/modpacks/versions/${versionId}/mods`, {
-                modrinthId: mod.project_id || mod.slug,
+                modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
                 name: mod.title,
                 iconUrl: mod.icon_url,
                 versionId: selectedModVersion || null,

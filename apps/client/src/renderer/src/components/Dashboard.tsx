@@ -28,8 +28,6 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
   const [selectedMod, setSelectedMod] = useState<any | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [modpacks, setModpacks] = useState<any[]>([]);
-
-  const [installingModpack, setInstallingModpack] = useState<string | null>(null);
   const [loadingModpacks, setLoadingModpacks] = useState(true);
 
   const [deletingModpack, setDeletingModpack] = useState<string | null>(null);
@@ -41,8 +39,17 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
 
   useEffect(() => {
     const handleNav = () => setActiveTab('settings');
+    const handleOpenCreator = () => {
+      setActiveTab('modpacks');
+      setShowCreateModpack(true);
+      // We could also pass details to a state if we want to pre-fill ModpackCreator
+    };
     window.addEventListener('navigate-settings', handleNav);
-    return () => window.removeEventListener('navigate-settings', handleNav);
+    window.addEventListener('open-modpack-creator', handleOpenCreator);
+    return () => {
+      window.removeEventListener('navigate-settings', handleNav);
+      window.removeEventListener('open-modpack-creator', handleOpenCreator);
+    };
   }, []);
 
   // Load Microsoft profile on mount
@@ -58,9 +65,9 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
-  const fetchModpacks = async () => {
+  const fetchModpacks = async (isBackground = false) => {
     if (!user?.id) return;
-    setLoadingModpacks(true);
+    if (!isBackground) setLoadingModpacks(true);
     try {
       const [authoredRes, sharedRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/modpacks/user/${user.id}`),
@@ -82,7 +89,7 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
     if (activeTab !== 'modpacks') return;
 
     fetchModpacks();
-    const interval = setInterval(fetchModpacks, 30000); // Pulse refresh every 30s
+    const interval = setInterval(() => fetchModpacks(true), 30000); // Pulse refresh every 30s
     return () => clearInterval(interval);
   }, [activeTab, user?.id]);
 
@@ -152,69 +159,6 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
     }
   };
 
-  const handleInstallModpack = async (mod: any) => {
-    if (installingModpack) return; // Prevent double-click
-
-    console.log('Auto-installing modpack:', mod);
-    setInstallingModpack(mod.project_id || mod.slug);
-
-    const gameVersion = mod.game_versions?.[0] || '1.20.1';
-    const loader = mod.loaders?.find((l: string) => l.toLowerCase() === 'fabric') || mod.loaders?.[0] || 'fabric';
-
-    try {
-      // 1. Create Modpack on Backend
-      const modpackResponse = await axios.post(`${API_BASE_URL}/modpacks`, {
-        name: mod.title,
-        description: mod.description,
-        authorId: user.id
-      });
-
-      // 2. Create Version
-      const versionResponse = await axios.post(`${API_BASE_URL}/modpacks/${modpackResponse.data.id}/versions`, {
-        versionNumber: '1.0.0',
-        gameVersion: gameVersion,
-        loaderType: loader.toLowerCase(),
-        loaderVersion: 'latest'
-      });
-
-      // 3. Add the Modpack-Project as a "Mod" to the version
-      // CRITICAL: projectType tells the sync engine to treat this as an .mrpack
-      await axios.post(`${API_BASE_URL}/modpacks/versions/${versionResponse.data.id}/mods`, {
-        modrinthId: mod.project_id || mod.slug,
-        name: mod.title,
-        iconUrl: mod.icon_url,
-        projectType: 'modpack',
-        versionId: null
-      });
-
-      // 4. Create Local Instance & Sync
-      const settingsStr = localStorage.getItem('mc_settings');
-      const settings = settingsStr ? JSON.parse(settingsStr) : {};
-      const mcPath = settings.mcPath || 'C:\\Minecraft';
-
-      await (window as any).api.createInstance({ rootPath: mcPath, modpackName: mod.title });
-
-      // 5. Sync modpack files (download .mrpack and extract)
-      await (window as any).api.syncModpack({
-        versionId: versionResponse.data.id,
-        modpackName: mod.title,
-        rootPath: mcPath,
-        gameVersion: gameVersion,
-        loaderType: loader.toLowerCase(),
-        token: localStorage.getItem('token')
-      });
-
-      // 6. Switch to modpacks tab and refresh
-      setActiveTab('modpacks');
-      await fetchModpacks();
-
-    } catch (err) {
-      console.error('Failed to auto-install modpack:', err);
-      toast.error('Install Failed', 'Failed to install modpack. Check console for details.');
-    } finally {
-      setInstallingModpack(null);
-    }
-  };
 
   const executeDeleteModpack = async (id: string) => {
     setDeletingModpack(id);
@@ -402,97 +346,57 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
                       <p className="text-slate-500 font-bold">Loading your modpacks...</p>
                     </div>
                   ) : modpacks.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
-                      {modpacks.map((pack) => (
-                        <div
-                          key={pack.id}
-                          onClick={() => setSelectedModpackId(pack.id)}
-                          className="bg-white/[0.02] border border-white/5 rounded-[2.5rem] p-8 md:p-10 hover:border-indigo-500/30 hover:bg-white/[0.04] transition-all duration-500 group flex flex-col relative overflow-hidden cursor-pointer"
-                        >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name });
-                            }}
-                            disabled={deletingModpack === pack.id}
-                            className="absolute top-4 right-4 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg disabled:opacity-70"
-                          >
-                            {deletingModpack === pack.id ? (
-                              <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-5 h-5" />
-                            )}
-                          </button>
-
-                          <div className="flex items-start justify-between mb-10">
-                            <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center shadow-inner">
-                              <Package className="w-10 h-10 text-indigo-500" />
-                            </div>
-                            <div className="flex flex-col items-end gap-1 mr-12">
-                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Version</span>
-                              <span className="text-white font-black text-xl">{pack.versions?.[0]?.versionNumber || '1.0.0'}</span>
-                            </div>
+                    <div className="space-y-16">
+                      {/* Private Modpacks */}
+                      {modpacks.filter(p => p.authorId === user.id).length > 0 && (
+                        <section>
+                          <div className="flex items-center gap-4 mb-10 ml-2">
+                            <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                            <h2 className="text-2xl font-black text-white uppercase tracking-widest">Private Modpacks</h2>
                           </div>
-
-                          <div className="mb-10">
-                            <h3 className="text-3xl font-black text-white mb-4 group-hover:text-indigo-400 transition-colors leading-tight">{pack.name}</h3>
-                            <p className="text-slate-400 font-medium line-clamp-2 text-lg leading-relaxed">{pack.description || 'No description provided.'}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
+                            {modpacks.filter(p => p.authorId === user.id).map((pack) => (
+                              <ModpackCard
+                                key={pack.id}
+                                pack={pack}
+                                onSelect={() => setSelectedModpackId(pack.id)}
+                                onLaunch={handleLaunch}
+                                onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
+                                deletingModpack={deletingModpack}
+                                globalLaunching={globalLaunching}
+                                isRunning={isRunning}
+                                activePackId={activePackId}
+                              />
+                            ))}
                           </div>
+                        </section>
+                      )}
 
-                          <div className="mt-auto pt-10 border-t border-white/5 flex flex-col gap-8">
-                            <div className="flex items-center justify-between">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Game Version</span>
-                                <span className="text-lg font-black text-slate-200">{pack.versions?.[0]?.gameVersion || 'N/A'}</span>
-                              </div>
-                              <div className="flex flex-col items-end gap-1">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Loader</span>
-                                <span className="text-lg font-black text-slate-200 capitalize">{pack.versions?.[0]?.loaderType || 'Vanilla'}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex gap-4">
-                              <button
-                                onClick={(e) => {
-                                  if (isRunning && activePackId === pack.id) {
-                                    e.stopPropagation();
-                                    (window as any).api.stopInstance(pack.name);
-                                  } else {
-                                    handleLaunch(e, pack);
-                                  }
-                                }}
-                                disabled={(globalLaunching || isRunning) && activePackId !== pack.id}
-                                className={`flex-1 py-5 rounded-2xl font-black transition-all duration-300 flex items-center justify-center gap-3 shadow-xl active:scale-[0.95] ${(globalLaunching && activePackId === pack.id)
-                                  ? 'bg-amber-500 text-white shadow-amber-500/20 cursor-wait'
-                                  : (isRunning && activePackId === pack.id)
-                                    ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20'
-                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20'
-                                  }`}
-                              >
-                                {globalLaunching && activePackId === pack.id ? (
-                                  <>
-                                    <Loader2 className="w-6 h-6 animate-spin" />
-                                    <span className="text-lg">Preparing...</span>
-                                  </>
-                                ) : isRunning && activePackId === pack.id ? (
-                                  <>
-                                    <Square className="w-6 h-6 fill-current" />
-                                    <span className="text-lg">Stop</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="w-6 h-6 fill-current" />
-                                    <span className="text-lg">Launch Game</span>
-                                  </>
-                                )}
-                              </button>
-                              <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-slate-400 group-hover:text-indigo-400 transition-colors">
-                                <ChevronDown className="w-6 h-6 -rotate-90" />
-                              </div>
-                            </div>
+                      {/* Group Shared Modpacks */}
+                      {modpacks.filter(p => p.authorId !== user.id).length > 0 && (
+                        <section>
+                          <div className="flex items-center gap-4 mb-10 ml-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <h2 className="text-2xl font-black text-white uppercase tracking-widest">Group / Shared Modpacks</h2>
                           </div>
-                        </div>
-                      ))}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
+                            {modpacks.filter(p => p.authorId !== user.id).map((pack) => (
+                              <ModpackCard
+                                key={pack.id}
+                                pack={pack}
+                                isShared
+                                onSelect={() => setSelectedModpackId(pack.id)}
+                                onLaunch={handleLaunch}
+                                onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
+                                deletingModpack={deletingModpack}
+                                globalLaunching={globalLaunching}
+                                isRunning={isRunning}
+                                activePackId={activePackId}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-32 text-center bg-white/[0.02] border border-white/5 rounded-[3rem] backdrop-blur-sm">
@@ -517,8 +421,6 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
                 onAddMod={(mod) => {
                   setSelectedMod(mod);
                 }}
-                onInstallModpack={handleInstallModpack}
-                installingId={installingModpack}
               />
             </div>
           )}
@@ -571,7 +473,6 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
         }}
       />
 
-      {/* Delete Confirmation Modal */}
       <DeleteConfirmationModal
         isOpen={!!deleteConfirmation}
         title={`Delete ${deleteConfirmation?.type === 'modpack' ? 'Modpack' : 'Group'}?`}
@@ -601,6 +502,105 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ModpackCard({ pack, onSelect, onLaunch, onDelete, deletingModpack, globalLaunching, isRunning, activePackId, isShared }: any) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`bg-white/[0.02] border ${isShared ? 'border-emerald-500/10 hover:border-emerald-500/30' : 'border-white/5 hover:border-indigo-500/30'} rounded-[2.5rem] p-8 md:p-10 hover:bg-white/[0.04] transition-all duration-500 group flex flex-col relative overflow-hidden cursor-pointer`}
+    >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        disabled={deletingModpack === pack.id}
+        className="absolute top-4 right-4 z-10 p-3 bg-red-500/10 text-red-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500 hover:text-white shadow-lg disabled:opacity-70"
+      >
+        {deletingModpack === pack.id ? (
+          <Loader2 className="w-5 h-5 animate-spin" />
+        ) : (
+          <Trash2 className="w-5 h-5" />
+        )}
+      </button>
+
+      {isShared && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-[0.15em] border border-emerald-500/20 backdrop-blur-md flex items-center gap-2">
+          <Users className="w-3.5 h-3.5" />
+          Group Pack
+        </div>
+      )}
+
+      <div className="flex items-start justify-between mb-10">
+        <div className={`w-20 h-20 ${isShared ? 'bg-emerald-600/20' : 'bg-indigo-600/20'} rounded-[2rem] flex items-center justify-center shadow-inner`}>
+          <Package className={`w-10 h-10 ${isShared ? 'text-emerald-500' : 'text-indigo-500'}`} />
+        </div>
+        <div className="flex flex-col items-end gap-1 mr-12">
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Version</span>
+          <span className="text-white font-black text-xl">{pack.versions?.[0]?.versionNumber || '1.0.0'}</span>
+        </div>
+      </div>
+
+      <div className="mb-10">
+        <h3 className={`text-3xl font-black text-white mb-4 group-hover:${isShared ? 'text-emerald-400' : 'text-indigo-400'} transition-colors leading-tight`}>{pack.name}</h3>
+        <p className="text-slate-400 font-medium line-clamp-2 text-lg leading-relaxed">{pack.description || 'No description provided.'}</p>
+      </div>
+
+      <div className="mt-auto pt-10 border-t border-white/5 flex flex-col gap-8">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Game Version</span>
+            <span className="text-lg font-black text-slate-200">{pack.versions?.[0]?.gameVersion || 'N/A'}</span>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Loader</span>
+            <span className="text-lg font-black text-slate-200 capitalize">{pack.versions?.[0]?.loaderType || 'Vanilla'}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-4">
+          <button
+            onClick={(e) => {
+              if (isRunning && activePackId === pack.id) {
+                e.stopPropagation();
+                (window as any).api.stopInstance(pack.name);
+              } else {
+                onLaunch(e, pack);
+              }
+            }}
+            disabled={(globalLaunching || isRunning) && activePackId !== pack.id}
+            className={`flex-1 py-5 rounded-2xl font-black transition-all duration-300 flex items-center justify-center gap-3 shadow-xl active:scale-[0.95] ${(globalLaunching && activePackId === pack.id)
+              ? 'bg-amber-500 text-white shadow-amber-500/20 cursor-wait'
+              : (isRunning && activePackId === pack.id)
+                ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20'
+                : isShared ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20'
+              }`}
+          >
+            {globalLaunching && activePackId === pack.id ? (
+              <>
+                <Loader2 className="w-6 h-6 animate-spin" />
+                <span className="text-lg">Preparing...</span>
+              </>
+            ) : isRunning && activePackId === pack.id ? (
+              <>
+                <Square className="w-6 h-6 fill-current" />
+                <span className="text-lg">Stop</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-6 h-6 fill-current" />
+                <span className="text-lg">Launch</span>
+              </>
+            )}
+          </button>
+          <div className={`w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-slate-400 group-hover:${isShared ? 'text-emerald-400' : 'text-indigo-400'} transition-colors`}>
+            <ChevronDown className="w-6 h-6 -rotate-90" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

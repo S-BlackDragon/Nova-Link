@@ -12,6 +12,42 @@ export class ModpacksService {
     private modrinthService: ModrinthService
   ) { }
 
+  async verifyPermission(userId: string, modpackId: string) {
+    console.log(`[verifyPermission] Checking permissions for userId=${userId}, modpackId=${modpackId}`);
+
+    // 1. Check if user is the author
+    const modpack = await this.prisma.modpack.findUnique({
+      where: { id: modpackId },
+      select: { authorId: true }
+    });
+
+    if (!modpack) {
+      console.log(`[verifyPermission] Modpack not found`);
+      return false;
+    }
+
+    console.log(`[verifyPermission] Modpack authorId=${modpack.authorId}, comparing with userId=${userId}`);
+
+    if (modpack.authorId === userId) {
+      console.log(`[verifyPermission] User is author, returning true`);
+      return true;
+    }
+
+    // 2. Check if user is an ADMIN or MODERATOR in a group targeting this modpack
+    const groupMembership = await this.prisma.groupMember.findFirst({
+      where: {
+        userId,
+        role: { in: ['ADMIN', 'MODERATOR'] },
+        group: {
+          targetModpackId: modpackId
+        }
+      }
+    });
+
+    console.log(`[verifyPermission] Group membership found: ${!!groupMembership}`);
+    return !!groupMembership;
+  }
+
   create(createModpackDto: CreateModpackDto) {
     return this.prisma.modpack.create({
       data: {
@@ -88,31 +124,95 @@ export class ModpacksService {
     return Array.from(modpackMap.values());
   }
 
-  findOne(id: string) {
-    return this.prisma.modpack.findUnique({
+  async findOne(id: string, userId?: string) {
+    const modpack = await this.prisma.modpack.findUnique({
       where: { id },
       include: {
         versions: {
+          orderBy: { createdAt: 'desc' },
           include: { mods: true }
         }
       },
     });
+
+    if (!modpack) return null;
+
+    let canEdit = false;
+    if (userId) {
+      canEdit = await this.verifyPermission(userId, id);
+    }
+
+    return {
+      ...modpack,
+      canEdit
+    };
   }
 
-  update(id: string, updateModpackDto: UpdateModpackDto) {
+  async update(id: string, updateModpackDto: UpdateModpackDto, userId: string) {
+    const hasPerm = await this.verifyPermission(userId, id);
+    if (!hasPerm) throw new Error('Unauthorized to modify this modpack');
+
     return this.prisma.modpack.update({
       where: { id },
       data: updateModpackDto,
     });
   }
 
+  async cloneModpack(modpackId: string, newOwnerId: string, suffix: string = '(Shared)') {
+    const original = await this.prisma.modpack.findUnique({
+      where: { id: modpackId },
+      include: {
+        versions: {
+          include: { mods: true }
+        }
+      }
+    });
 
-  async addMod(versionId: string, modData: any) {
-    // 1. Get version details to determine compatibility
+    if (!original) throw new Error('Modpack not found');
+
+    // Create the clone
+    return this.prisma.modpack.create({
+      data: {
+        name: `${original.name} ${suffix}`.substring(0, 50),
+        description: original.description,
+        authorId: newOwnerId,
+        versions: {
+          create: original.versions.map(v => ({
+            versionNumber: v.versionNumber,
+            gameVersion: v.gameVersion,
+            loaderType: v.loaderType,
+            loaderVersion: v.loaderVersion,
+            isPublished: v.isPublished,
+            mods: {
+              create: v.mods.map(m => ({
+                modrinthId: m.modrinthId,
+                name: m.name,
+                versionId: m.versionId,
+                iconUrl: m.iconUrl,
+                projectType: m.projectType,
+                filename: m.filename,
+                url: m.url,
+                sha1: m.sha1,
+                size: m.size,
+                enabled: m.enabled
+              }))
+            }
+          }))
+        }
+      }
+    });
+  }
+
+
+  async addMod(versionId: string, modData: any, userId: string) {
+    // 1. Get version details to determine compatibility and modpack ID for permission check
     const version = await this.prisma.modpackVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) throw new Error('Version not found');
+
+    const hasPerm = await this.verifyPermission(userId, version.modpackId);
+    if (!hasPerm) throw new Error('Unauthorized to modify this modpack');
 
     // 2. Get currently installed mods to avoid duplicates
     const existingMods = await this.prisma.mod.findMany({
@@ -262,23 +362,46 @@ export class ModpacksService {
     return createdMods;
   }
 
-  async removeMod(modId: string) {
+  async removeMod(modId: string, userId: string) {
+    const mod = await this.prisma.mod.findUnique({
+      where: { id: modId },
+      include: { modpackVersion: true }
+    });
+    if (!mod) throw new Error('Mod not found');
+
+    const hasPerm = await this.verifyPermission(userId, mod.modpackVersion.modpackId);
+    if (!hasPerm) throw new Error('Unauthorized to modify this modpack');
+
     return this.prisma.mod.delete({
       where: { id: modId },
     });
   }
 
-  async toggleMod(modId: string, enabled: boolean) {
+  async toggleMod(modId: string, enabled: boolean, userId: string) {
+    const mod = await this.prisma.mod.findUnique({
+      where: { id: modId },
+      include: { modpackVersion: true }
+    });
+    if (!mod) throw new Error('Mod not found');
+
+    const hasPerm = await this.verifyPermission(userId, mod.modpackVersion.modpackId);
+    if (!hasPerm) throw new Error('Unauthorized to modify this modpack');
+
     return this.prisma.mod.update({
       where: { id: modId },
       data: { enabled }
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
+    const hasPerm = await this.verifyPermission(userId, id);
+    if (!hasPerm) throw new Error('Unauthorized to delete this modpack');
+
     // Delete all versions first
     await this.prisma.modpackVersion.deleteMany({ where: { modpackId: id } });
     // Delete the modpack
-    return this.prisma.modpack.delete({ where: { id } });
+    return this.prisma.mod.deleteMany({ where: { modpackVersion: { modpackId: id } } }).then(() =>
+      this.prisma.modpack.delete({ where: { id } })
+    );
   }
 }

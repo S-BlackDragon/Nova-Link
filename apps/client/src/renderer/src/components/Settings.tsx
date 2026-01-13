@@ -13,6 +13,7 @@ export default function Settings() {
     const [minMemory, setMinMemory] = useState('2G');
     const [offlineMode, setOfflineMode] = useState(false);
     const [notificationSounds, setNotificationSounds] = useState(true);
+    const [amdCompatibility, setAmdCompatibility] = useState(false);
     const [saved, setSaved] = useState(false);
     const toast = useToast();
 
@@ -22,7 +23,7 @@ export default function Settings() {
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
-        localStorage.setItem('mc_settings', JSON.stringify({ mcPath, maxMemory, minMemory, offlineMode, notificationSounds }));
+        localStorage.setItem('mc_settings', JSON.stringify({ mcPath, maxMemory, minMemory, offlineMode, notificationSounds, amdCompatibility }));
         setSaved(true);
         toast.success('Settings Saved', 'Your preferences have been updated.');
         setTimeout(() => setSaved(false), 2000);
@@ -65,6 +66,7 @@ export default function Settings() {
                 if (parsed.minMemory) setMinMemory(parsed.minMemory);
                 if (parsed.offlineMode !== undefined) setOfflineMode(parsed.offlineMode);
                 if (parsed.notificationSounds !== undefined) setNotificationSounds(parsed.notificationSounds);
+                if (parsed.amdCompatibility !== undefined) setAmdCompatibility(parsed.amdCompatibility);
             }
 
             // Load Microsoft profile if exists
@@ -205,6 +207,40 @@ export default function Settings() {
                     </div>
                 </div>
 
+                {/* AMD Compatibility Toggle */}
+                <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-10 rounded-[3rem] shadow-2xl group hover:border-red-500/20 transition-all duration-500">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                            <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-inner ${amdCompatibility ? 'bg-red-600/20' : 'bg-slate-700/30'}`}>
+                                <Cpu className={`w-8 h-8 ${amdCompatibility ? 'text-red-500' : 'text-slate-500'}`} />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-black text-white tracking-tight">AMD Compatibility Mode</h2>
+                                <p className="text-slate-400 text-lg font-medium max-w-lg">
+                                    Fixes crashes on AMD/Intel GPUs by disabling the NeoForge early loading screen.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Toggle Switch */}
+                        <button
+                            type="button"
+                            onClick={() => setAmdCompatibility(!amdCompatibility)}
+                            className={`relative w-20 h-10 rounded-full transition-all duration-300 ${amdCompatibility ? 'bg-red-500' : 'bg-slate-700'}`}
+                        >
+                            <div className={`absolute top-1 w-8 h-8 bg-white rounded-full shadow-lg transition-all duration-300 ${amdCompatibility ? 'left-11' : 'left-1'}`} />
+                        </button>
+                    </div>
+
+                    {amdCompatibility && (
+                        <div className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                            <p className="text-red-400 text-sm font-medium">
+                                🚀 Compatibility mode enabled. This will disable the early loading window and use specialized driver workarounds.
+                            </p>
+                        </div>
+                    )}
+                </div>
+
                 {/* Minecraft Path */}
                 <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-10 rounded-[3rem] shadow-2xl group hover:border-indigo-500/20 transition-all duration-500">
                     <div className="flex items-center gap-6 mb-10">
@@ -317,8 +353,8 @@ export default function Settings() {
                         Save Changes
                     </button>
                 </div>
-            </form>
-        </div>
+            </form >
+        </div >
     );
 }
 

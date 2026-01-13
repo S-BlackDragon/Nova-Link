@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
 import { ModpacksService } from './modpacks.service';
 import { CreateModpackDto } from './dto/create-modpack.dto';
 import { UpdateModpackDto } from './dto/update-modpack.dto';
@@ -22,18 +22,23 @@ export class ModpacksController {
 
 
   @Post('versions/:versionId/mods')
-  addMod(@Param('versionId') versionId: string, @Body() modData: any) {
-    return this.modpacksService.addMod(versionId, modData);
+  addMod(@Param('versionId') versionId: string, @Body() modData: any, @Request() req: any) {
+    return this.modpacksService.addMod(versionId, modData, req.user.id);
+  }
+
+  @Post(':id/clone')
+  clone(@Param('id') id: string, @Body() body: { suffix?: string }, @Request() req: any) {
+    return this.modpacksService.cloneModpack(id, req.user.id, body.suffix);
   }
 
   @Delete('mods/:modId')
-  removeMod(@Param('modId') modId: string) {
-    return this.modpacksService.removeMod(modId);
+  removeMod(@Param('modId') modId: string, @Request() req: any) {
+    return this.modpacksService.removeMod(modId, req.user.id);
   }
 
   @Patch('mods/:modId')
-  toggleMod(@Param('modId') modId: string, @Body() body: { enabled: boolean }) {
-    return this.modpacksService.toggleMod(modId, body.enabled);
+  toggleMod(@Param('modId') modId: string, @Body() body: { enabled: boolean }, @Request() req: any) {
+    return this.modpacksService.toggleMod(modId, body.enabled, req.user.id);
   }
 
   @Get()
@@ -52,17 +57,19 @@ export class ModpacksController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.modpacksService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req: any) {
+    const userId = req.user?.id;
+    console.log(`[ModpacksController] findOne called for id=${id}, userId=${userId}`);
+    return this.modpacksService.findOne(id, userId);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateModpackDto: UpdateModpackDto) {
-    return this.modpacksService.update(id, updateModpackDto);
+  update(@Param('id') id: string, @Body() updateModpackDto: UpdateModpackDto, @Request() req: any) {
+    return this.modpacksService.update(id, updateModpackDto, req.user.id);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.modpacksService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.modpacksService.remove(id, req.user.id);
   }
 }
