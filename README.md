@@ -4,9 +4,10 @@
 
 Welcome to **Nova Link**, a next-generation Minecraft launcher designed to make managing and playing modpacks seamless, beautiful, and social. Built with modern web technologies and a focus on user experience.
 
-![Version](https://img.shields.io/badge/version-1.0.48-blueviolet.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.1.0-blueviolet.svg?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-Stable-success.svg?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg?style=for-the-badge&logo=windows)
+![License](https://img.shields.io/badge/license-Apache--2.0-green.svg?style=for-the-badge)
 
 ---
 
@@ -27,21 +28,21 @@ Welcome to **Nova Link**, a next-generation Minecraft launcher designed to make 
 
 ---
 
-## 📦 What's New in v1.0.48?
+## 📦 What's New in v1.1.0?
 
-This release focuses on **Social Identity and Stability**:
+This is our **first public release**! 🎉
 
-*   **📸 Avatar System Overhaul**:
-    *   Direct-to-Cloud uploads using **MinIO** pre-signed URLs.
-    *   Secure and fast image hosting.
-    *   Real-time profile updates.
-*   **🔐 Enhanced Security**:
-    *   Improved JWT handling and storage.
-    *   Strict **Content Security Policies (CSP)** for safer browsing.
-*   **🐛 Bug Fixes**:
-    *   Fixed authentication token mismatches.
-    *   Resolved connection issues with backend storage services.
-    *   Overall stability improvements for long sessions.
+*   **🔧 Bug Fixes**:
+    *   Fixed session logout issue on app startup
+    *   Fixed scrolling in "Add Content" tab of modpack details
+    *   Improved Mod Discovery Hub layout in compact mode
+*   **⚙️ New Features**:
+    *   Added auto-update toggle in Settings
+*   **📜 Legal Documentation**:
+    *   Added Apache-2.0 license for client
+    *   Added trademark guidelines
+    *   Added contribution guidelines
+    *   Added terms of service
 
 ---
 
@@ -63,12 +64,37 @@ Nova Link is built with a modern stack:
 git clone https://github.com/S-BlackDragon/Nova-Link.git
 
 # Install dependencies
+cd apps/client
 npm install
 
 # Run dev mode
 npm run dev
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+---
+
+## 📜 License
+
+| Component | License |
+|-----------|---------|
+| **Client** (`apps/client`) | [Apache-2.0](LICENSE) |
+| **Backend** (`apps/backend`) | Proprietary |
+| **Brand Assets** (`assets/brand`) | All Rights Reserved |
+
+### Important Documents
+
+- [LICENSE](LICENSE) - Apache License 2.0 (for client)
+- [TRADEMARKS.md](TRADEMARKS.md) - Trademark guidelines
+- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
+- [TERMS.md](TERMS.md) - Terms of Service
+
+> ⚠️ **Note**: While the client source code is open source, the "Nova Link" name, logo, and branding are protected. See [TRADEMARKS.md](TRADEMARKS.md) for details.
+
 ---
 
 Made with ❤️ by the **Nova Link Team**
+
+© 2024-2026 Nova Link Team. All Rights Reserved.
+

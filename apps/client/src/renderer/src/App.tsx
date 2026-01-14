@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Login from './components/Auth/Login';
@@ -8,6 +8,7 @@ import ForgotPassword from './components/Auth/ForgotPassword';
 import ResetPassword from './components/Auth/ResetPassword';
 import Dashboard from './components/Dashboard';
 import UpdateModal from './components/UpdateModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LogProvider } from './contexts/LogContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { API_BASE_URL } from './config/api';
@@ -24,12 +25,17 @@ function App(): React.JSX.Element {
   const [tempEmail, setTempEmail] = useState<string>('');
   const [isInitializing, setIsInitializing] = useState(true);
 
+  // Track if auth has been restored from localStorage to avoid premature logout on 401
+  const authRestoredRef = useRef(false);
+
   useEffect(() => {
     // Response interceptor for session expiry
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error.response?.status === 401) {
+        // Only trigger logout on 401 if auth has been restored (not during initialization)
+        // This prevents the "Fetch Failed" error on startup when token hasn't loaded yet
+        if (error.response?.status === 401 && authRestoredRef.current) {
           handleLogout();
         }
         return Promise.reject(error);
@@ -74,9 +80,12 @@ function App(): React.JSX.Element {
   useEffect(() => {
     // Startup initialization
     const initApp = async () => {
-      // 1. Check for updates immediately
+      // 1. Check for updates immediately (unless preference is manual)
       try {
-        await (window as any).api.checkForUpdates();
+        const updatePref = localStorage.getItem('update_preference');
+        if (updatePref !== 'manual') {
+          await (window as any).api.checkForUpdates();
+        }
       } catch (err) {
         console.error('Failed to check updates on startup:', err);
       }
@@ -95,6 +104,8 @@ function App(): React.JSX.Element {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
     }
+    // Mark auth as restored - now 401 interceptor can trigger logout
+    authRestoredRef.current = true;
   }, []);
 
   const handleAuthSuccess = (newToken: string, newUser: any) => {
@@ -232,12 +243,14 @@ function App(): React.JSX.Element {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <LogProvider>
-        <ToastProvider>
-          {content}
-          <UpdateModal />
-        </ToastProvider>
-      </LogProvider>
+      <ErrorBoundary>
+        <LogProvider>
+          <ToastProvider>
+            {content}
+            <UpdateModal />
+          </ToastProvider>
+        </LogProvider>
+      </ErrorBoundary>
     </QueryClientProvider>
   );
 }

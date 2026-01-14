@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX } from 'lucide-react';
+import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX, RefreshCw } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 
 interface MicrosoftProfile {
@@ -14,6 +14,7 @@ export default function Settings() {
     const [offlineMode, setOfflineMode] = useState(false);
     const [notificationSounds, setNotificationSounds] = useState(true);
     const [amdCompatibility, setAmdCompatibility] = useState(false);
+    const [autoUpdate, setAutoUpdate] = useState(true);
     const [saved, setSaved] = useState(false);
     const toast = useToast();
 
@@ -68,6 +69,11 @@ export default function Settings() {
                 if (parsed.notificationSounds !== undefined) setNotificationSounds(parsed.notificationSounds);
                 if (parsed.amdCompatibility !== undefined) setAmdCompatibility(parsed.amdCompatibility);
             }
+
+            // Load auto-update preference (stored separately)
+            const updatePref = localStorage.getItem('update_preference');
+            // 'manual' means auto-updates are disabled; anything else means enabled
+            setAutoUpdate(updatePref !== 'manual');
 
             // Load Microsoft profile if exists
             const msProfile = localStorage.getItem('ms_profile');
@@ -205,6 +211,45 @@ export default function Settings() {
                             <div className={`absolute top-1 w-8 h-8 bg-white rounded-full shadow-lg transition-all duration-300 ${notificationSounds ? 'left-11' : 'left-1'}`} />
                         </button>
                     </div>
+                </div>
+
+                {/* Auto-Update Toggle */}
+                <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-10 rounded-[3rem] shadow-2xl group hover:border-cyan-500/20 transition-all duration-500">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                            <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-inner ${autoUpdate ? 'bg-cyan-600/20' : 'bg-slate-700/30'}`}>
+                                <RefreshCw className={`w-8 h-8 ${autoUpdate ? 'text-cyan-500' : 'text-slate-500'}`} />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-black text-white tracking-tight">Automatic Updates</h2>
+                                <p className="text-slate-400 text-lg font-medium max-w-lg">
+                                    Check for updates automatically when the app starts.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Toggle Switch */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const newValue = !autoUpdate;
+                                setAutoUpdate(newValue);
+                                // Save preference immediately
+                                localStorage.setItem('update_preference', newValue ? 'ask' : 'manual');
+                            }}
+                            className={`relative w-20 h-10 rounded-full transition-all duration-300 ${autoUpdate ? 'bg-cyan-500' : 'bg-slate-700'}`}
+                        >
+                            <div className={`absolute top-1 w-8 h-8 bg-white rounded-full shadow-lg transition-all duration-300 ${autoUpdate ? 'left-11' : 'left-1'}`} />
+                        </button>
+                    </div>
+
+                    {!autoUpdate && (
+                        <div className="mt-6 p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+                            <p className="text-cyan-400 text-sm font-medium">
+                                ℹ️ Automatic updates disabled. Use the "Check Updates" button in the sidebar to manually check for new versions.
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* AMD Compatibility Toggle */}

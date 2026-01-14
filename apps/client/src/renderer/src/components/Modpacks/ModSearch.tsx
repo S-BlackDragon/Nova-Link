@@ -155,12 +155,16 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
             )}
 
             <div className="flex flex-col gap-10">
-                <div className="relative overflow-hidden p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] bg-gradient-to-br from-emerald-600/20 to-indigo-600/20 border border-white/5 shadow-2xl">
-                    <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 blur-[100px] -mr-48 -mt-48 rounded-full" />
-                    <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500/10 blur-[100px] -ml-48 -mb-48 rounded-full" />
+                <div className={`relative overflow-hidden ${fixedFilters ? 'p-4 rounded-[1.5rem]' : 'p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem]'} bg-gradient-to-br from-emerald-600/20 to-indigo-600/20 border border-white/5 shadow-2xl`}>
+                    {!fixedFilters && (
+                        <>
+                            <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 blur-[100px] -mr-48 -mt-48 rounded-full" />
+                            <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500/10 blur-[100px] -ml-48 -mb-48 rounded-full" />
+                        </>
+                    )}
                     <div className="relative z-10">
-                        <div className="flex items-center justify-between mb-6">
-                            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tighter">Mod Discovery Hub</h1>
+                        <div className="flex items-center justify-between mb-2">
+                            <h1 className={`${fixedFilters ? 'text-2xl' : 'text-4xl md:text-5xl lg:text-6xl'} font-black text-white tracking-tighter`}>Mod Discovery Hub</h1>
                             <div className={`px-4 py-2 rounded-full border border-white/5 flex items-center gap-2 ${serviceStatus === 'operational' ? 'bg-emerald-500/20 text-emerald-400' : serviceStatus === 'down' ? 'bg-red-500/20 text-red-400' : 'bg-slate-500/20 text-slate-400'}`}>
                                 <div className={`w-2 h-2 rounded-full ${serviceStatus === 'operational' ? 'bg-emerald-500 animate-pulse' : serviceStatus === 'down' ? 'bg-red-500' : 'bg-slate-500'}`} />
                                 <span className="text-xs font-bold uppercase tracking-wider">
@@ -168,9 +172,11 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 </span>
                             </div>
                         </div>
-                        <p className="text-slate-300 text-lg md:text-xl lg:text-2xl font-medium max-w-2xl leading-relaxed">
-                            Discover thousands of high-quality mods, modpacks, and resource packs curated for your ultimate Minecraft experience.
-                        </p>
+                        {!fixedFilters && (
+                            <p className="text-slate-300 text-lg md:text-xl lg:text-2xl font-medium max-w-2xl leading-relaxed">
+                                Discover thousands of high-quality mods, modpacks, and resource packs curated for your ultimate Minecraft experience.
+                            </p>
+                        )}
                     </div>
                 </div>
 

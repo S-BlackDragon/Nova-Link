@@ -28,7 +28,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
     const { launching: globalLaunching, activePackId, setLaunchingInfo, status: launchStatus, progress: launchProgress } = useLogs();
     const [activeTab, setActiveTab] = useState<Tab>('content');
     const [activeContentType, setActiveContentType] = useState<ContentType>('mod');
-    const [diskFiles, setDiskFiles] = useState<string[]>([]);
+    const [diskMap, setDiskMap] = useState<Record<string, string[]>>({});
     const [detailedModId, setDetailedModId] = useState<string | null>(null);
     const [pathNotification, setPathNotification] = useState(false);
     const [authNotification, setAuthNotification] = useState(false);
@@ -43,7 +43,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
             });
             setModpack(response.data);
             await Promise.all([
-                fetchDiskFiles(response.data, activeContentType),
+                fetchDiskFiles(response.data),
                 checkRunningStatus(response.data)
             ]);
         } catch (err) {
@@ -54,17 +54,24 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         }
     };
 
-    const fetchDiskFiles = async (packData = modpack, type = activeContentType) => {
+    const fetchDiskFiles = async (packData = modpack) => {
         if (!packData) return;
         try {
             const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
             const rootPath = settings.mcPath || 'C:\\Minecraft';
-            const files = await (window as any).api.listMods({
-                rootPath,
-                modpackName: packData.name,
-                type
-            });
-            setDiskFiles(files);
+            const types = ['mod', 'resourcepack', 'shader', 'datapack'];
+            const newMap: Record<string, string[]> = {};
+
+            await Promise.all(types.map(async (type) => {
+                const files = await (window as any).api.listMods({
+                    rootPath,
+                    modpackName: packData.name,
+                    type
+                });
+                newMap[type] = files;
+            }));
+
+            setDiskMap(newMap);
         } catch (e) {
             console.error('Failed to list disk files:', e);
         }
@@ -72,7 +79,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
     useEffect(() => {
         if (activeTab === 'content') {
-            fetchDiskFiles(modpack, activeContentType);
+            fetchDiskFiles(modpack);
         }
     }, [activeContentType, activeTab]);
 
@@ -121,12 +128,28 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         }
     };
 
-    const handleRemoveMod = async (modId: string) => {
+    const handleRemoveMod = async (modId: string, filename?: string, isExternal?: boolean) => {
         try {
-            await axios.delete(`${API_BASE_URL}/modpacks/mods/${modId}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
-            fetchDetails();
+            if (isExternal && filename) {
+                // Remove local file via IPC
+                const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+                const rootPath = settings.mcPath || 'C:\\Minecraft';
+
+                await (window as any).api.invoke('remove-mod-file', {
+                    rootPath,
+                    modpackName: modpack.name,
+                    filename
+                });
+
+                // Refresh local files
+                fetchDiskFiles();
+            } else {
+                // Remove from database
+                await axios.delete(`${API_BASE_URL}/modpacks/mods/${modId}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                });
+                fetchDetails();
+            }
         } catch (err) {
             console.error('Failed to remove mod:', err);
         }
@@ -152,7 +175,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                     });
                 }
-                await fetchDiskFiles(modpack, activeContentType);
+                await fetchDiskFiles(modpack);
             } else {
                 console.error('Failed to toggle mod file:', result.error);
             }
@@ -164,14 +187,15 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
     const currentVersion = modpack?.versions?.[0];
     const mods = currentVersion?.mods || [];
     const dbMods = mods.filter((m: any) => m.projectType === activeContentType);
-    const diskMap = new Map(diskFiles.map(f => [f.replace('.disabled', '').toLowerCase(), f]));
+    const currentDiskFiles = diskMap[activeContentType] || [];
+    const localDiskMap = new Map(currentDiskFiles.map(f => [f.replace('.disabled', '').toLowerCase(), f]));
 
     const mergedContent = dbMods.map((dbMod: any) => {
         const cleanName = dbMod.filename || `${dbMod.name}.jar`;
-        const diskFile = diskMap.get(cleanName.toLowerCase());
+        const diskFile = localDiskMap.get(cleanName.toLowerCase());
         const isDisabled = diskFile?.endsWith('.disabled');
 
-        if (diskFile) diskMap.delete(cleanName.toLowerCase());
+        if (diskFile) localDiskMap.delete(cleanName.toLowerCase());
 
         return {
             id: dbMod.id,
@@ -185,7 +209,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
         };
     });
 
-    diskMap.forEach((filename) => {
+    localDiskMap.forEach((filename) => {
         const isDisabled = filename.endsWith('.disabled');
         mergedContent.push({
             id: filename,
@@ -450,10 +474,50 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
                 {activeTab === 'content' && (
                     <div className="flex items-center gap-8 px-10 py-3 bg-white/[0.01] border-b border-white/5 overflow-x-auto no-scrollbar">
-                        <CategoryTab active={activeContentType === 'mod'} onClick={() => setActiveContentType('mod')} label="Mods" />
-                        <CategoryTab active={activeContentType === 'resourcepack'} onClick={() => setActiveContentType('resourcepack')} label="Resource Packs" />
-                        <CategoryTab active={activeContentType === 'shader'} onClick={() => setActiveContentType('shader')} label="Shaders" />
-                        <CategoryTab active={activeContentType === 'datapack'} onClick={() => setActiveContentType('datapack')} label="Datapacks" />
+                        {(() => {
+                            const getMergedCount = (type: string) => {
+                                const dbMods = mods.filter((m: any) => m.projectType === type);
+                                const diskFiles = diskMap[type] || [];
+
+                                // Prioritize disk count if we have scanned files
+                                // This solves inconsistencies where DB has 127 but disk has 147 (due to dependencies etc)
+                                // We want to show the user exactly how many items are installed.
+                                if (diskFiles.length > 0) {
+                                    return diskFiles.length;
+                                }
+
+                                return dbMods.length;
+                            };
+
+                            return (
+                                <>
+                                    <CategoryTab
+                                        active={activeContentType === 'mod'}
+                                        onClick={() => setActiveContentType('mod')}
+                                        label="Mods"
+                                        count={getMergedCount('mod')}
+                                    />
+                                    <CategoryTab
+                                        active={activeContentType === 'resourcepack'}
+                                        onClick={() => setActiveContentType('resourcepack')}
+                                        label="Resource Packs"
+                                        count={getMergedCount('resourcepack')}
+                                    />
+                                    <CategoryTab
+                                        active={activeContentType === 'shader'}
+                                        onClick={() => setActiveContentType('shader')}
+                                        label="Shaders"
+                                        count={getMergedCount('shader')}
+                                    />
+                                    <CategoryTab
+                                        active={activeContentType === 'datapack'}
+                                        onClick={() => setActiveContentType('datapack')}
+                                        label="Datapacks"
+                                        count={getMergedCount('datapack')}
+                                    />
+                                </>
+                            );
+                        })()}
                     </div>
                 )}
 
@@ -473,10 +537,15 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                     />
                                 </div>
                                 <button
-                                    onClick={handleSync}
+                                    onClick={async () => {
+                                        // Fast Refresh
+                                        setSyncing(true);
+                                        await Promise.all([fetchDetails(), fetchDiskFiles()]);
+                                        setSyncing(false);
+                                    }}
                                     disabled={syncing}
                                     className="p-5 bg-emerald-600/10 border border-emerald-500/20 rounded-[1.5rem] text-emerald-500 hover:text-white hover:bg-emerald-600 transition-all group active:scale-95 disabled:opacity-50 shadow-xl"
-                                    title="Sync with local folder"
+                                    title="Refresh local files"
                                 >
                                     <Loader2 className={`w-6 h-6 ${syncing ? 'animate-spin text-emerald-500' : 'hidden'}`} />
                                     {!syncing && <RotateCw className="w-6 h-6 group-hover:rotate-180 transition-transform duration-500" />}
@@ -485,82 +554,119 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
 
                             {filteredContent.length > 0 ? (
                                 <div className="grid grid-cols-1 gap-4">
-                                    {filteredContent.map((mod: any) => (
-                                        <div
-                                            key={mod.id}
-                                            onClick={() => {
-                                                if (mod.modrinthId) setDetailedModId(mod.modrinthId);
-                                            }}
-                                            className={`flex items-center justify-between p-7 bg-white/[0.02] border ${mod.enabled === false ? 'border-red-500/20 opacity-60' : 'border-white/5'} rounded-[2.2rem] hover:bg-white/[0.05] hover:border-white/10 transition-all group cursor-pointer shadow-sm relative overflow-hidden`}
-                                        >
-                                            <div className="flex items-center gap-6">
-                                                <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0 shadow-2xl relative border border-white/5">
-                                                    {mod.iconUrl ? (
-                                                        <img
-                                                            src={mod.iconUrl}
-                                                            alt={mod.name}
-                                                            className={`w-full h-full object-cover ${mod.enabled === false ? 'grayscale' : ''}`}
-                                                            onError={(e) => {
-                                                                const target = e.target as HTMLImageElement;
-                                                                target.style.display = 'none';
-                                                                const parent = target.parentElement;
-                                                                if (parent) {
-                                                                    parent.innerHTML = '<div class="flex items-center justify-center w-full h-full text-slate-500 font-bold">?</div>';
-                                                                }
+                                    {filteredContent.map((mod: any) => {
+                                        let SourceIcon = AlertCircle;
+                                        let sourceColor = 'text-slate-500 bg-slate-500/10 border-slate-500/20';
+                                        let sourceLabel = 'Unknown Source';
+
+                                        if (mod.modrinthId) {
+                                            SourceIcon = Package;
+                                            sourceColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+                                            sourceLabel = 'Modrinth';
+                                        } else if (mod.url && mod.url.includes('curseforge.com')) {
+                                            SourceIcon = Folder;
+                                            sourceColor = 'text-orange-500 bg-orange-500/10 border-orange-500/20';
+                                            sourceLabel = 'CurseForge';
+                                        } else if (mod.url && mod.url.includes('github.com')) {
+                                            SourceIcon = Terminal;
+                                            sourceColor = 'text-white bg-white/10 border-white/20';
+                                            sourceLabel = 'GitHub';
+                                        }
+
+                                        return (
+                                            <div
+                                                key={mod.id}
+                                                onClick={() => {
+                                                    if (mod.modrinthId) setDetailedModId(mod.modrinthId);
+                                                }}
+                                                className={`flex items-center justify-between p-7 bg-white/[0.02] border ${mod.enabled === false ? 'border-red-500/20 opacity-60' : 'border-white/5'} rounded-[2.2rem] hover:bg-white/[0.05] hover:border-white/10 transition-all group cursor-pointer shadow-sm relative overflow-hidden`}
+                                            >
+                                                <div className="flex items-center gap-6">
+                                                    <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0 shadow-2xl relative border border-white/5">
+                                                        {mod.iconUrl ? (
+                                                            <img
+                                                                src={mod.iconUrl}
+                                                                alt={mod.name}
+                                                                className={`w-full h-full object-cover ${mod.enabled === false ? 'grayscale' : ''}`}
+                                                                onError={(e) => {
+                                                                    const target = e.target as HTMLImageElement;
+                                                                    target.style.display = 'none';
+                                                                    const parent = target.parentElement;
+                                                                    if (parent) {
+                                                                        parent.innerHTML = '<div class="flex items-center justify-center w-full h-full text-slate-500 font-bold">?</div>';
+                                                                    }
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <Package className="w-10 h-10 text-slate-600" />
+                                                        )}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-3 mb-1">
+                                                            <p className={`text-white font-black text-xl truncate ${mod.enabled === false ? 'line-through text-slate-500' : ''}`}>{mod.name}</p>
+                                                            <div
+                                                                className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${sourceColor}`}
+                                                                title={`Source: ${sourceLabel}`}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!mod.modrinthId && mod.url) {
+                                                                        if (confirm(`This file comes from an external source (${sourceLabel}).\n\nDo you want to visit: ${mod.url}?`)) {
+                                                                            window.open(mod.url, '_blank');
+                                                                        }
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <SourceIcon className="w-3 h-3" />
+                                                                {sourceLabel}
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-slate-500 text-xs font-black tracking-widest uppercase truncate max-w-sm">{mod.filename}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    {modpack.canEdit && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleToggleMod(mod, mod.enabled ?? true);
                                                             }}
-                                                        />
-                                                    ) : (
-                                                        <Package className="w-10 h-10 text-slate-600" />
+                                                            className={`p-4 rounded-2xl transition-all shadow-xl ${mod.enabled === false ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white'}`}
+                                                            title={mod.enabled === false ? "Enable" : "Disable"}
+                                                        >
+                                                            {mod.enabled === false ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                                        </button>
+                                                    )}
+
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (mod.modrinthId) {
+                                                                setDetailedModId(mod.modrinthId);
+                                                            }
+                                                        }}
+                                                        className={`p-4 rounded-2xl transition-all shadow-xl ${mod.modrinthId ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500 hover:text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                                                        title={mod.modrinthId ? "View mod details" : "External mod - no details available"}
+                                                        disabled={!mod.modrinthId}
+                                                    >
+                                                        <Info className="w-5 h-5" />
+                                                    </button>
+
+                                                    {modpack.canEdit && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveMod(mod.id, mod.filename, mod.isExternal);
+                                                            }}
+                                                            className="p-4 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-xl"
+                                                            title="Remove from modpack"
+                                                        >
+                                                            <Trash2 className="w-5 h-5" />
+                                                        </button>
                                                     )}
                                                 </div>
-                                                <div className="min-w-0">
-                                                    <p className={`text-white font-black text-xl mb-1 truncate ${mod.enabled === false ? 'line-through text-slate-500' : ''}`}>{mod.name}</p>
-                                                    <p className="text-slate-500 text-xs font-black tracking-widest uppercase truncate max-w-sm">{mod.filename}</p>
-                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                {modpack.canEdit && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleToggleMod(mod, mod.enabled ?? true);
-                                                        }}
-                                                        className={`p-4 rounded-2xl transition-all shadow-xl ${mod.enabled === false ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white'}`}
-                                                        title={mod.enabled === false ? "Enable" : "Disable"}
-                                                    >
-                                                        {mod.enabled === false ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                                    </button>
-                                                )}
-
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (mod.modrinthId) {
-                                                            setDetailedModId(mod.modrinthId);
-                                                        }
-                                                    }}
-                                                    className={`p-4 rounded-2xl transition-all shadow-xl ${mod.modrinthId ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500 hover:text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-                                                    title={mod.modrinthId ? "View mod details" : "External mod - no details available"}
-                                                    disabled={!mod.modrinthId}
-                                                >
-                                                    <Info className="w-5 h-5" />
-                                                </button>
-
-                                                {modpack.canEdit && !mod.isExternal && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleRemoveMod(mod.id);
-                                                        }}
-                                                        className="p-4 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-xl"
-                                                        title="Remove from modpack"
-                                                    >
-                                                        <Trash2 className="w-5 h-5" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             ) : (
                                 <div className="text-center py-32 bg-white/[0.01] rounded-[3rem] border border-dashed border-white/5">
@@ -571,153 +677,169 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                         </div>
                     )}
 
-                    {activeTab === 'search' && (
-                        <div className="absolute inset-0 overflow-hidden">
-                            <ModSearch
-                                defaultGameVersion={currentVersion?.gameVersion}
-                                defaultLoader={currentVersion?.loaderType}
-                                fixedFilters={true}
-                                onAddMod={async (mod) => {
-                                    try {
-                                        const token = localStorage.getItem('token');
-                                        await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
-                                            modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
-                                            name: mod.title,
-                                            iconUrl: mod.icon_url,
-                                            versionId: mod.versionId || null
-                                        }, {
-                                            headers: { Authorization: `Bearer ${token}` }
-                                        });
-                                        await handleSync();
-                                        fetchDetails();
-                                        setActiveTab('content');
-                                    } catch (e) {
-                                        console.error(e);
-                                    }
-                                }}
-                            />
-                        </div>
-                    )}
 
-                    {activeTab === 'logs' && (
-                        <div className="absolute inset-0 bg-black">
-                            <LauncherConsole isEmbedded={true} />
-                        </div>
-                    )}
-                </div>
-            </div>
+                    {
+                        activeTab === 'search' && (
+                            <div className="absolute inset-0 overflow-y-auto custom-scrollbar p-6">
+                                <ModSearch
+                                    defaultGameVersion={currentVersion?.gameVersion}
+                                    defaultLoader={currentVersion?.loaderType}
+                                    fixedFilters={true}
+                                    onAddMod={async (mod) => {
+                                        try {
+                                            const token = localStorage.getItem('token');
+                                            await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
+                                                modrinthId: mod.modrinthId || mod.project_id || mod.id || mod.slug,
+                                                name: mod.title,
+                                                iconUrl: mod.icon_url,
+                                                versionId: mod.versionId || null
+                                            }, {
+                                                headers: { Authorization: `Bearer ${token}` }
+                                            });
+                                            await handleSync();
+                                            fetchDetails();
+                                            setActiveTab('content');
+                                        } catch (e) {
+                                            console.error(e);
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )
+                    }
+
+                    {
+                        activeTab === 'logs' && (
+                            <div className="absolute inset-0 bg-black">
+                                <LauncherConsole isEmbedded={true} />
+                            </div>
+                        )
+                    }
+                </div >
+            </div >
 
             {/* Overlays */}
-            {(pathNotification || authNotification) && (
-                <div className="absolute top-10 right-10 z-[200] flex flex-col gap-4 animate-in slide-in-from-right duration-300">
-                    {pathNotification && (
-                        <div className="bg-slate-900 border border-indigo-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
-                            <div className="flex items-start gap-4">
-                                <AlertCircle className="w-8 h-8 text-indigo-500 flex-shrink-0" />
-                                <div>
-                                    <h3 className="text-white font-black text-lg">Path Not Set</h3>
-                                    <p className="text-slate-400 font-medium text-sm">You need to set an installation path before playing.</p>
+            {
+                (pathNotification || authNotification) && (
+                    <div className="absolute top-10 right-10 z-[200] flex flex-col gap-4 animate-in slide-in-from-right duration-300">
+                        {pathNotification && (
+                            <div className="bg-slate-900 border border-indigo-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
+                                <div className="flex items-start gap-4">
+                                    <AlertCircle className="w-8 h-8 text-indigo-500 flex-shrink-0" />
+                                    <div>
+                                        <h3 className="text-white font-black text-lg">Path Not Set</h3>
+                                        <p className="text-slate-400 font-medium text-sm">You need to set an installation path before playing.</p>
+                                    </div>
+                                    <button onClick={() => setPathNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
                                 </div>
-                                <button onClick={() => setPathNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setPathNotification(false);
+                                            const event = new CustomEvent('navigate-settings');
+                                            window.dispatchEvent(event);
+                                        }}
+                                        className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-sm"
+                                    >
+                                        Configure
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const defaultPath = 'C:\\Users\\' + ((window as any).msProfile?.name || 'User') + '\\AppData\\Roaming\\.minecraft';
+                                            const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+                                            localStorage.setItem('mc_settings', JSON.stringify({ ...settings, mcPath: defaultPath }));
+                                            setPathNotification(false);
+                                        }}
+                                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-xl text-sm"
+                                    >
+                                        Default
+                                    </button>
+                                </div>
                             </div>
-                            <div className="flex gap-3">
+                        )}
+
+                        {authNotification && (
+                            <div className="bg-slate-900 border border-red-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
+                                <div className="flex items-start gap-4">
+                                    <AlertCircle className="w-8 h-8 text-red-500 flex-shrink-0" />
+                                    <div>
+                                        <h3 className="text-white font-black text-lg">Login Required</h3>
+                                        <p className="text-slate-400 font-medium text-sm">Enable Offline Mode or sign in with Microsoft to play.</p>
+                                    </div>
+                                    <button onClick={() => setAuthNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
+                                </div>
                                 <button
                                     onClick={() => {
-                                        setPathNotification(false);
+                                        setAuthNotification(false);
                                         const event = new CustomEvent('navigate-settings');
                                         window.dispatchEvent(event);
                                     }}
-                                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-sm"
+                                    className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-xl text-sm"
                                 >
-                                    Configure
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        const defaultPath = 'C:\\Users\\' + ((window as any).msProfile?.name || 'User') + '\\AppData\\Roaming\\.minecraft';
-                                        const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
-                                        localStorage.setItem('mc_settings', JSON.stringify({ ...settings, mcPath: defaultPath }));
-                                        setPathNotification(false);
-                                    }}
-                                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-xl text-sm"
-                                >
-                                    Default
+                                    Go to Settings
                                 </button>
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
+                )
+            }
 
-                    {authNotification && (
-                        <div className="bg-slate-900 border border-red-500/50 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 max-w-sm">
-                            <div className="flex items-start gap-4">
-                                <AlertCircle className="w-8 h-8 text-red-500 flex-shrink-0" />
-                                <div>
-                                    <h3 className="text-white font-black text-lg">Login Required</h3>
-                                    <p className="text-slate-400 font-medium text-sm">Enable Offline Mode or sign in with Microsoft to play.</p>
-                                </div>
-                                <button onClick={() => setAuthNotification(false)}><X className="w-5 h-5 text-slate-500" /></button>
-                            </div>
-                            <button
-                                onClick={() => {
-                                    setAuthNotification(false);
-                                    const event = new CustomEvent('navigate-settings');
-                                    window.dispatchEvent(event);
-                                }}
-                                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-xl text-sm"
-                            >
-                                Go to Settings
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
+            {
+                showSyncModal && (
+                    <SyncProgressModal
+                        status={syncState.status}
+                        progress={syncState.progress}
+                        currentFile={syncState.currentFile}
+                        error={syncState.error}
+                        onClose={() => setShowSyncModal(false)}
+                    />
+                )
+            }
 
-            {showSyncModal && (
-                <SyncProgressModal
-                    status={syncState.status}
-                    progress={syncState.progress}
-                    currentFile={syncState.currentFile}
-                    error={syncState.error}
-                    onClose={() => setShowSyncModal(false)}
-                />
-            )}
-
-            {detailedModId && (
-                <ModDetailsModal
-                    projectId={detailedModId}
-                    gameVersion={currentVersion?.gameVersion}
-                    loader={currentVersion?.loaderType}
-                    onClose={() => setDetailedModId(null)}
-                    canEdit={modpack.canEdit}
-                    onAddMod={async (project, versionId) => {
-                        try {
-                            const token = localStorage.getItem('token');
-                            await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
-                                modrinthId: project.id,
-                                name: project.title,
-                                iconUrl: project.icon_url,
-                                versionId: versionId
-                            }, {
-                                headers: { Authorization: `Bearer ${token}` }
-                            });
-                            await handleSync();
-                            fetchDetails();
-                        } catch (e) {
-                            console.error(e);
-                        }
-                    }}
-                />
-            )}
-        </div>
+            {
+                detailedModId && (
+                    <ModDetailsModal
+                        projectId={detailedModId}
+                        gameVersion={currentVersion?.gameVersion}
+                        loader={currentVersion?.loaderType}
+                        onClose={() => setDetailedModId(null)}
+                        canEdit={modpack.canEdit}
+                        onAddMod={async (project, versionId) => {
+                            try {
+                                const token = localStorage.getItem('token');
+                                await axios.post(`${API_BASE_URL}/modpacks/versions/${currentVersion.id}/mods`, {
+                                    modrinthId: project.id,
+                                    name: project.title,
+                                    iconUrl: project.icon_url,
+                                    versionId: versionId
+                                }, {
+                                    headers: { Authorization: `Bearer ${token}` }
+                                });
+                                await handleSync();
+                                fetchDetails();
+                            } catch (e) {
+                                console.error(e);
+                            }
+                        }}
+                    />
+                )
+            }
+        </div >
     );
 }
 
-function CategoryTab({ active, onClick, label }: { active: boolean, onClick: () => void, label: string }) {
+function CategoryTab({ active, onClick, label, count }: { active: boolean, onClick: () => void, label: string, count?: number }) {
     return (
         <button
             onClick={onClick}
-            className={`px-4 py-2 text-sm font-black uppercase tracking-[0.2em] transition-all border-b-2 flex-shrink-0 ${active ? 'text-emerald-500 border-emerald-500' : 'text-slate-500 hover:text-white border-transparent'}`}
+            className={`px-4 py-2 text-sm font-black uppercase tracking-[0.2em] transition-all border-b-2 flex-shrink-0 flex items-center gap-2 ${active ? 'text-emerald-500 border-emerald-500' : 'text-slate-500 hover:text-white border-transparent'}`}
         >
             {label}
+            {count !== undefined && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] ${active ? 'bg-emerald-500/20' : 'bg-slate-800'}`}>
+                    {count}
+                </span>
+            )}
         </button>
     );
 }

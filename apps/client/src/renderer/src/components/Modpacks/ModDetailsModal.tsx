@@ -41,6 +41,42 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
         });
     }, [versions, internalGameVersion, internalLoader]);
 
+    // Extract unique loaders from all versions
+    const availableLoaders = useMemo(() => {
+        const loaderSet = new Set<string>();
+        versions.forEach(v => {
+            if (v.loaders) {
+                v.loaders.forEach((l: string) => {
+                    // Capitalize first letter for display
+                    const formatted = l.charAt(0).toUpperCase() + l.slice(1).toLowerCase();
+                    loaderSet.add(formatted);
+                });
+            }
+        });
+        return Array.from(loaderSet).sort();
+    }, [versions]);
+
+    // Extract unique game versions from all versions
+    const availableGameVersions = useMemo(() => {
+        const versionSet = new Set<string>();
+        versions.forEach(v => {
+            if (v.game_versions) {
+                v.game_versions.forEach((gv: string) => versionSet.add(gv));
+            }
+        });
+        // Sort versions in descending order (newest first)
+        return Array.from(versionSet).sort((a, b) => {
+            const aParts = a.split('.').map(Number);
+            const bParts = b.split('.').map(Number);
+            for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                const aNum = aParts[i] || 0;
+                const bNum = bParts[i] || 0;
+                if (bNum !== aNum) return bNum - aNum;
+            }
+            return 0;
+        });
+    }, [versions]);
+
     // Fetch project details once
     useEffect(() => {
         const fetchDetails = async () => {
@@ -187,12 +223,15 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-8 bg-slate-950/80 backdrop-blur-xl overflow-hidden">
-            <div className="bg-slate-900 border border-white/10 w-full max-w-6xl h-full max-h-[90vh] rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300">
+
+            <div className="bg-slate-900 border border-white/10 w-full max-w-6xl h-full max-h-[90vh] rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300 relative">
                 {/* Header Section */}
                 <div className="relative p-10 flex flex-col md:flex-row gap-8 bg-gradient-to-br from-white/[0.03] to-transparent border-b border-white/5">
+                    {/* Close Button - Restored inside container with square style */}
                     <button
                         onClick={onClose}
-                        className="absolute top-8 right-8 p-3 hover:bg-white/10 rounded-2xl transition-all text-slate-500 hover:text-white z-10"
+                        className="absolute top-8 right-8 p-3 rounded-2xl text-slate-500 hover:text-white hover:bg-red-500 transition-all z-20"
+                        title="Close"
                     >
                         <X className="w-8 h-8" />
                     </button>
@@ -262,13 +301,17 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                 </span>
                                 <button
                                     onClick={() => {
-                                        onClose();
+                                        // onClose(); // Keep open so context is preserved on cancel
                                         window.dispatchEvent(new CustomEvent('open-modpack-creator', {
                                             detail: {
                                                 name: project.title,
                                                 description: project.description,
                                                 gameVersion: selectedVersion.game_versions[0],
-                                                loader: selectedVersion.loaders[0]
+                                                loader: selectedVersion.loaders[0],
+                                                supportedLoaders: selectedVersion.loaders,
+                                                supportedGameVersions: availableGameVersions,
+                                                modrinthModpackId: project.id,
+                                                modrinthVersionId: selectedVersion.id
                                             }
                                         }));
                                     }}
@@ -290,8 +333,8 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                 onClick={() => handleAdd(selectedVersion)}
                                 disabled={adding}
                                 className={`px-8 py-3 rounded-2xl font-black flex items-center gap-2 transition-all shadow-xl active:scale-95 sparkle-button mb-1 mt-1 ${hasWarning
-                                        ? 'bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white'
-                                        : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white'
+                                    ? 'bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white'
+                                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white'
                                     }`}
                             >
                                 {adding ? <Loader2 className="w-5 h-5 animate-spin" /> : hasWarning ? <AlertCircle className="w-5 h-5" /> : <Download className="w-5 h-5" />}
@@ -356,7 +399,7 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                                     className="bg-slate-950/50 border border-white/10 text-white text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500/50 transition-all min-w-[140px] appearance-none cursor-pointer hover:border-white/20"
                                                 >
                                                     <option value="Any">Any Version</option>
-                                                    {[...(project.game_versions || [])].reverse().map((gv: string) => (
+                                                    {availableGameVersions.map((gv: string) => (
                                                         <option key={gv} value={gv}>{gv}</option>
                                                     ))}
                                                 </select>
@@ -374,7 +417,7 @@ export default function ModDetailsModal({ projectId, gameVersion, loader, onClos
                                                     className="bg-slate-950/50 border border-white/10 text-white text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500/50 transition-all min-w-[140px] appearance-none cursor-pointer hover:border-white/20"
                                                 >
                                                     <option value="Any">Any Loader</option>
-                                                    {['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((l: string) => (
+                                                    {availableLoaders.map((l: string) => (
                                                         <option key={l} value={l} className="capitalize">
                                                             {l}
                                                         </option>

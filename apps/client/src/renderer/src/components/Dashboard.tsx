@@ -29,8 +29,11 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [modpacks, setModpacks] = useState<any[]>([]);
   const [loadingModpacks, setLoadingModpacks] = useState(true);
+  const [modpackImportData, setModpackImportData] = useState<any | null>(null);
 
   const [deletingModpack, setDeletingModpack] = useState<string | null>(null);
+  // Move install progress listeners to Dashboard
+  const [installProgress, setInstallProgress] = useState<{ status: string, progress: number, detail?: string } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'modpack' | 'group', id: string, name: string } | null>(null);
   const [msProfile, setMsProfile] = useState<{ name: string } | null>(null);
@@ -38,11 +41,29 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
   const toast = useToast();
 
   useEffect(() => {
+    // Listen for installation progress
+    if ((window as any).api.onInstallationProgress) {
+      const cleanup = (window as any).api.onInstallationProgress((data: any) => {
+        setInstallProgress(data);
+        // Auto-clear when done
+        if (data.progress >= 100 || data.status === 'complete' || data.status === 'error') {
+          if (data.status !== 'error') {
+            setTimeout(() => setInstallProgress(null), 3000);
+          }
+        }
+      });
+      return cleanup; // Assuming api returns cleanup, otherwise just leave it (it's a persistent listener usually)
+    }
+  }, []);
+
+  useEffect(() => {
     const handleNav = () => setActiveTab('settings');
-    const handleOpenCreator = () => {
-      setActiveTab('modpacks');
+    const handleOpenCreator = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      // Do NOT switch tab, just open overlay
+      // setActiveTab('modpacks'); 
       setShowCreateModpack(true);
-      // We could also pass details to a state if we want to pre-fill ModpackCreator
+      setModpackImportData(customEvent.detail || null);
     };
     window.addEventListener('navigate-settings', handleNav);
     window.addEventListener('open-modpack-creator', handleOpenCreator);
@@ -227,7 +248,9 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
 
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 w-full font-sans">
+    <div className="flex h-screen bg-slate-950 text-slate-200 w-full font-sans relative">
+
+
       {/* Sidebar */}
       <aside className="w-20 lg:w-72 bg-slate-900/40 backdrop-blur-3xl border-r border-white/5 flex flex-col flex-shrink-0 z-20 relative transition-all duration-300">
         <div className="p-6 lg:p-8 flex items-center gap-4 justify-center lg:justify-start">
@@ -243,6 +266,9 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
               key={item.id}
               onClick={() => {
                 setActiveTab(item.id as any);
+                // Don't close creator if it's open, just switch background tab?
+                // Or typically nav clicks should leave creator?
+                // Let's close creator if user explicitly navigates
                 setShowCreateModpack(false);
                 setSelectedModpackId(null);
               }}
@@ -315,101 +341,88 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
         <div key={activeTab} className="w-full px-6 py-8 md:px-12 lg:px-20 max-w-[1800px] mx-auto transition-all duration-500">
           {activeTab === 'modpacks' && (
             <div>
-              {showCreateModpack ? (
-                <ModpackCreator
-                  userId={user?.id}
-                  onCreated={() => {
-                    setShowCreateModpack(false);
-                    fetchModpacks();
-                  }}
-                  onCancel={() => setShowCreateModpack(false)}
-                />
-              ) : (
-                <>
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12 md:mb-16">
-                    <div className="text-center md:text-left">
-                      <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight">My Modpacks</h1>
-                      <p className="text-slate-400 text-lg md:text-xl font-medium">Manage and launch your custom Minecraft experiences.</p>
-                    </div>
-                    <button
-                      onClick={() => setShowCreateModpack(true)}
-                      className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center justify-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-[0.97]"
-                    >
-                      <Plus className="w-6 h-6" />
-                      <span className="text-lg">New Modpack</span>
-                    </button>
-                  </div>
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12 md:mb-16">
+                <div className="text-center md:text-left">
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight">My Modpacks</h1>
+                  <p className="text-slate-400 text-lg md:text-xl font-medium">Manage and launch your custom Minecraft experiences.</p>
+                </div>
+                <button
+                  onClick={() => setShowCreateModpack(true)}
+                  className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-[1.25rem] font-black transition-all duration-300 flex items-center justify-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-[0.97]"
+                >
+                  <Plus className="w-6 h-6" />
+                  <span className="text-lg">New Modpack</span>
+                </button>
+              </div>
 
-                  {loadingModpacks ? (
-                    <div className="flex flex-col items-center justify-center py-32">
-                      <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-                      <p className="text-slate-500 font-bold">Loading your modpacks...</p>
-                    </div>
-                  ) : modpacks.length > 0 ? (
-                    <div className="space-y-16">
-                      {/* Private Modpacks */}
-                      {modpacks.filter(p => p.authorId === user.id).length > 0 && (
-                        <section>
-                          <div className="flex items-center gap-4 mb-10 ml-2">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                            <h2 className="text-2xl font-black text-white uppercase tracking-widest">Private Modpacks</h2>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
-                            {modpacks.filter(p => p.authorId === user.id).map((pack) => (
-                              <ModpackCard
-                                key={pack.id}
-                                pack={pack}
-                                onSelect={() => setSelectedModpackId(pack.id)}
-                                onLaunch={handleLaunch}
-                                onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
-                                deletingModpack={deletingModpack}
-                                globalLaunching={globalLaunching}
-                                isRunning={isRunning}
-                                activePackId={activePackId}
-                              />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* Group Shared Modpacks */}
-                      {modpacks.filter(p => p.authorId !== user.id).length > 0 && (
-                        <section>
-                          <div className="flex items-center gap-4 mb-10 ml-2">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <h2 className="text-2xl font-black text-white uppercase tracking-widest">Group / Shared Modpacks</h2>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
-                            {modpacks.filter(p => p.authorId !== user.id).map((pack) => (
-                              <ModpackCard
-                                key={pack.id}
-                                pack={pack}
-                                isShared
-                                onSelect={() => setSelectedModpackId(pack.id)}
-                                onLaunch={handleLaunch}
-                                onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
-                                deletingModpack={deletingModpack}
-                                globalLaunching={globalLaunching}
-                                isRunning={isRunning}
-                                activePackId={activePackId}
-                              />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-32 text-center bg-white/[0.02] border border-white/5 rounded-[3rem] backdrop-blur-sm">
-                      <div className="w-28 h-28 bg-slate-800/40 rounded-[2.5rem] flex items-center justify-center mb-10 border border-white/5 shadow-inner">
-                        <Package className="w-14 h-14 text-slate-500" />
+              {loadingModpacks ? (
+                <div className="flex flex-col items-center justify-center py-32">
+                  <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+                  <p className="text-slate-500 font-bold">Loading your modpacks...</p>
+                </div>
+              ) : modpacks.length > 0 ? (
+                <div className="space-y-16">
+                  {/* Private Modpacks */}
+                  {modpacks.filter(p => p.authorId === user.id).length > 0 && (
+                    <section>
+                      <div className="flex items-center gap-4 mb-10 ml-2">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                        <h2 className="text-2xl font-black text-white uppercase tracking-widest">Private Modpacks</h2>
                       </div>
-                      <h2 className="text-3xl font-black text-white mb-4">No modpacks yet</h2>
-                      <p className="text-slate-400 max-w-md text-xl leading-relaxed font-medium">
-                        Create your first modpack or join a group to start playing with your friends.
-                      </p>
-                    </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
+                        {modpacks.filter(p => p.authorId === user.id).map((pack) => (
+                          <ModpackCard
+                            key={pack.id}
+                            pack={pack}
+                            onSelect={() => setSelectedModpackId(pack.id)}
+                            onLaunch={handleLaunch}
+                            onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
+                            deletingModpack={deletingModpack}
+                            globalLaunching={globalLaunching}
+                            isRunning={isRunning}
+                            activePackId={activePackId}
+                          />
+                        ))}
+                      </div>
+                    </section>
                   )}
-                </>
+
+                  {/* Group Shared Modpacks */}
+                  {modpacks.filter(p => p.authorId !== user.id).length > 0 && (
+                    <section>
+                      <div className="flex items-center gap-4 mb-10 ml-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <h2 className="text-2xl font-black text-white uppercase tracking-widest">Group / Shared Modpacks</h2>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 min-[1900px]:grid-cols-4 gap-6 md:gap-8 lg:gap-10">
+                        {modpacks.filter(p => p.authorId !== user.id).map((pack) => (
+                          <ModpackCard
+                            key={pack.id}
+                            pack={pack}
+                            isShared
+                            onSelect={() => setSelectedModpackId(pack.id)}
+                            onLaunch={handleLaunch}
+                            onDelete={() => setDeleteConfirmation({ type: 'modpack', id: pack.id, name: pack.name })}
+                            deletingModpack={deletingModpack}
+                            globalLaunching={globalLaunching}
+                            isRunning={isRunning}
+                            activePackId={activePackId}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-32 text-center bg-white/[0.02] border border-white/5 rounded-[3rem] backdrop-blur-sm">
+                  <div className="w-28 h-28 bg-slate-800/40 rounded-[2.5rem] flex items-center justify-center mb-10 border border-white/5 shadow-inner">
+                    <Package className="w-14 h-14 text-slate-500" />
+                  </div>
+                  <h2 className="text-3xl font-black text-white mb-4">No modpacks yet</h2>
+                  <p className="text-slate-400 max-w-md text-xl leading-relaxed font-medium">
+                    Create your first modpack or join a group to start playing with your friends.
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -484,22 +497,68 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
         }}
       />
 
-      {/* Global Progress Indicator */}
-      {(globalLaunching || (useLogs().progress > 0 && useLogs().progress < 100)) && (
+      {/* Modpack Creator Overlay - Render LAST to be on top of modals */}
+      {showCreateModpack && (
+        <div className="fixed inset-0 z-[300] bg-slate-950 animate-in fade-in duration-200">
+          <ModpackCreator
+            userId={user?.id}
+            importData={modpackImportData}
+            installProgress={installProgress} // Pass progress down
+            onCreated={() => {
+              setShowCreateModpack(false);
+              setModpackImportData(null);
+              fetchModpacks();
+              toast.success('Success', 'Modpack created successfully!');
+            }}
+            onCancel={() => {
+              setShowCreateModpack(false);
+              setModpackImportData(null);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Global Progress Indicator - Expanded for Installs */}
+      {((globalLaunching || (useLogs().progress > 0 && useLogs().progress < 100)) || (installProgress && !showCreateModpack)) && (
         <div className="fixed bottom-6 right-6 z-[100] bg-slate-900 border border-indigo-500/30 p-4 rounded-2xl shadow-2xl flex flex-col gap-2 w-80 animate-in slide-in-from-bottom duration-300">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
-              <span className="text-sm font-bold text-white truncate max-w-[150px]">{useLogs().status || 'Processing...'}</span>
+          {/* Launching Progress */}
+          {(globalLaunching || (useLogs().progress > 0 && useLogs().progress < 100)) && (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+                  <span className="text-sm font-bold text-white truncate max-w-[150px]">{useLogs().status || 'Processing...'}</span>
+                </div>
+                <span className="text-xs font-black text-indigo-400">{useLogs().progress}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-indigo-500/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 transition-all duration-300"
+                  style={{ width: `${useLogs().progress}%` }}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Installation Progress (if not showing creator) */}
+          {installProgress && !showCreateModpack && (
+            <div className="mt-2 pt-2 border-t border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" />
+                  <span className="text-sm font-bold text-white truncate max-w-[150px]">{installProgress.status === 'downloading' ? 'Downloading...' : installProgress.status}</span>
+                </div>
+                <span className="text-xs font-black text-emerald-400">{Math.round(installProgress.progress)}%</span>
+              </div>
+              <p className="text-[10px] text-slate-500 truncate mb-1">{installProgress.detail}</p>
+              <div className="w-full h-1.5 bg-emerald-500/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${installProgress.progress}%` }}
+                />
+              </div>
             </div>
-            <span className="text-xs font-black text-indigo-400">{useLogs().progress}%</span>
-          </div>
-          <div className="w-full h-1.5 bg-indigo-500/10 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-indigo-500 transition-all duration-300"
-              style={{ width: `${useLogs().progress}%` }}
-            />
-          </div>
+          )}
         </div>
       )}
     </div>
@@ -507,6 +566,28 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
 }
 
 function ModpackCard({ pack, onSelect, onLaunch, onDelete, deletingModpack, globalLaunching, isRunning, activePackId, isShared }: any) {
+  // Fetch actual disk count
+  const [diskCount, setDiskCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchDiskCount = async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('mc_settings') || '{}');
+        const files = await (window as any).api.listMods({
+          rootPath: settings.mcPath,
+          modpackName: pack.name,
+          type: 'mod'
+        });
+        if (Array.isArray(files) && files.length > 0) {
+          setDiskCount(files.length);
+        }
+      } catch (err) {
+        // Ignore errors, fallback to DB count
+      }
+    };
+    fetchDiskCount();
+  }, [pack.name]);
+
   return (
     <div
       onClick={onSelect}
@@ -555,6 +636,12 @@ function ModpackCard({ pack, onSelect, onLaunch, onDelete, deletingModpack, glob
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Game Version</span>
             <span className="text-lg font-black text-slate-200">{pack.versions?.[0]?.gameVersion || 'N/A'}</span>
           </div>
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mods</span>
+            <span className="text-lg font-black text-slate-200">
+              {diskCount !== null ? diskCount : (pack.versions?.[0]?.mods?.length || 0)}
+            </span>
+          </div>
           <div className="flex flex-col items-end gap-1">
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Loader</span>
             <span className="text-lg font-black text-slate-200 capitalize">{pack.versions?.[0]?.loaderType || 'Vanilla'}</span>
@@ -601,6 +688,6 @@ function ModpackCard({ pack, onSelect, onLaunch, onDelete, deletingModpack, glob
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
