@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX, Download } from 'lucide-react';
+import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX, Download, AlertCircle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 
 interface MicrosoftProfile {
@@ -25,9 +25,17 @@ export default function Settings() {
     const [msAccount, setMsAccount] = useState<MicrosoftProfile | null>(null);
     const [msLoading, setMsLoading] = useState(false);
 
+    // Initial state for change detection
+    const [initialSettings, setInitialSettings] = useState<any>({});
+    const [hasChanges, setHasChanges] = useState(false);
+
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
+        const settingsToSave = { mcPath, maxMemory, minMemory, offlineMode, notificationSounds, amdCompatibility, updatePreference };
         localStorage.setItem('mc_settings', JSON.stringify({ mcPath, maxMemory, minMemory, offlineMode, notificationSounds, amdCompatibility }));
+        localStorage.setItem('update_preference', updatePreference);
+
+        setInitialSettings(settingsToSave);
         setSaved(true);
         toast.success('Settings Saved', 'Your preferences have been updated.');
         setTimeout(() => setSaved(false), 2000);
@@ -63,6 +71,16 @@ export default function Settings() {
     useEffect(() => {
         try {
             const settings = localStorage.getItem('mc_settings');
+            let currentSettings: any = {
+                mcPath: '',
+                maxMemory: '4G',
+                minMemory: '2G',
+                offlineMode: false,
+                notificationSounds: true,
+                amdCompatibility: false,
+                updatePreference: 'ask'
+            };
+
             if (settings) {
                 const parsed = JSON.parse(settings);
                 if (parsed.mcPath) setMcPath(parsed.mcPath);
@@ -71,15 +89,20 @@ export default function Settings() {
                 if (parsed.offlineMode !== undefined) setOfflineMode(parsed.offlineMode);
                 if (parsed.notificationSounds !== undefined) setNotificationSounds(parsed.notificationSounds);
                 if (parsed.amdCompatibility !== undefined) setAmdCompatibility(parsed.amdCompatibility);
+
+                currentSettings = { ...currentSettings, ...parsed };
             }
 
-            // Load update preference (stored separately)
+            // Load update preference
             const updatePref = localStorage.getItem('update_preference') as UpdatePreference;
             if (updatePref && ['always', 'ask', 'manual'].includes(updatePref)) {
                 setUpdatePreference(updatePref);
+                currentSettings.updatePreference = updatePref;
             } else {
-                setUpdatePreference('ask'); // Default to 'ask'
+                setUpdatePreference('ask');
             }
+
+            setInitialSettings(currentSettings);
 
             // Load Microsoft profile if exists
             const msProfile = localStorage.getItem('ms_profile');
@@ -90,6 +113,24 @@ export default function Settings() {
             console.error('Failed to load settings:', err);
         }
     }, []);
+
+    // Check for changes
+    useEffect(() => {
+        const current = { mcPath, maxMemory, minMemory, offlineMode, notificationSounds, amdCompatibility, updatePreference };
+        // Simple shallow comparison check
+        const isModified = JSON.stringify(current) !== JSON.stringify(initialSettings);
+        setHasChanges(isModified);
+
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (isModified) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [mcPath, maxMemory, minMemory, offlineMode, notificationSounds, amdCompatibility, updatePreference, initialSettings]);
 
     return (
         <div className="w-full max-w-5xl mx-auto">
@@ -460,21 +501,33 @@ export default function Settings() {
                     </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-8 pt-6">
-                    {saved && (
-                        <div className="flex items-center gap-3 text-emerald-400 font-black text-lg duration-500">
-                            <CheckCircle2 className="w-7 h-7" />
-                            Settings saved!
+                <div className={`fixed bottom-8 right-8 z-[200] flex items-center gap-6 transition-all duration-500 ${hasChanges ? 'translate-y-0 opacity-100' : 'translate-y-32 opacity-0'}`}>
+                    <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 p-2 px-6 rounded-2xl shadow-2xl flex items-center gap-6">
+                        <div className="flex items-center gap-3">
+                            <AlertCircle className="w-5 h-5 text-amber-500 animate-pulse" />
+                            <span className="text-white font-bold">Unsaved Changes</span>
                         </div>
-                    )}
-                    <button
-                        type="submit"
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-black px-12 py-6 rounded-[1.5rem] transition-all duration-300 shadow-2xl shadow-indigo-500/30 flex items-center gap-3 active:scale-[0.97] text-xl"
-                    >
-                        <Save className="w-7 h-7" />
-                        Save Changes
-                    </button>
+                        <div className="h-8 w-px bg-white/10" />
+                        <div className="flex items-center gap-3">
+                            {saved && (
+                                <div className="flex items-center gap-2 text-emerald-400 font-bold animate-in fade-in slide-in-from-bottom-2">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    <span>Saved!</span>
+                                </div>
+                            )}
+                            <button
+                                type="submit"
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-black px-8 py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/30 flex items-center gap-2 active:scale-95"
+                            >
+                                <Save className="w-5 h-5" />
+                                Save
+                            </button>
+                        </div>
+                    </div>
                 </div>
+
+                {/* Spacer for floating button */}
+                <div className="h-24" />
             </form >
         </div >
     );

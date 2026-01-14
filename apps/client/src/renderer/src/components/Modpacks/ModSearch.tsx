@@ -34,6 +34,8 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
     const [trendingResourcePacks, setTrendingResourcePacks] = useState<any[]>([]);
     const [loadingDiscovery, setLoadingDiscovery] = useState(false);
 
+    const [viewMode, setViewMode] = useState<'discovery' | 'search'>('discovery');
+
     const loaders = ['Any', 'Fabric', 'Forge', 'Quilt', 'NeoForge'];
     const versions = ['Any', '1.21.1', '1.20.4', '1.20.1', '1.19.2', '1.18.2', '1.16.5'];
     const projectTypes = [
@@ -68,10 +70,8 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
             setPage(1);
         }
 
-        if (!query.trim()) {
-            setMods([]);
-            return;
-        }
+        // Always switch to search mode when searching
+        if (viewMode === 'discovery') setViewMode('search');
 
         setLoading(true);
         setError(null);
@@ -98,9 +98,30 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
         }
     };
 
+    const handleViewAll = (type: string) => {
+        setProjectType(type);
+        setQuery('');
+        setViewMode('search');
+        setPage(1);
+        // Ensure we trigger a new search immediately or let the effect handle it
+        // Since we changed viewMode to 'search', the effect below should trigger handleSearch
+    };
+
     useEffect(() => {
         const timer = setTimeout(() => {
             setDebouncedQuery(query);
+            if (query.trim()) {
+                setViewMode('search');
+            } else if (viewMode === 'search' && !query.trim()) {
+                // If we are in search mode but query is empty, we might want to stay in search mode (e.g. View All)
+                // or go back to discovery. 
+                // Decision: If user manually clears input, go back to discovery? 
+                // Or maybe only if they explicitly click "Back to Discovery" (not implemented).
+                // For now, let's keep search mode if it was explicitly set (like via View All), 
+                // but if user clears a query, maybe they want discovery?
+                // Let's stick to simple: if query typed -> search mode.
+                // If View All clicked -> search mode (handled in handleViewAll).
+            }
         }, 200);
         return () => clearTimeout(timer);
     }, [query]);
@@ -110,13 +131,13 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
     }, [debouncedQuery, gameVersion, loader, projectType]);
 
     useEffect(() => {
-        if (!query.trim()) {
+        if (viewMode === 'discovery') {
             fetchDiscovery();
         } else {
             handleSearch();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
-    }, [debouncedQuery, gameVersion, loader, projectType, page]);
+    }, [debouncedQuery, gameVersion, loader, projectType, page, viewMode]);
 
     const [serviceStatus, setServiceStatus] = useState<'checking' | 'operational' | 'down'>('checking');
 
@@ -251,7 +272,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                 </div>
             )}
 
-            {!query ? (
+            {viewMode === 'discovery' ? (
                 <div className="space-y-20">
                     {loadingDiscovery ? (
                         <div className="flex flex-col items-center justify-center py-40 gap-8">
@@ -266,7 +287,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 bgColor="bg-indigo-500/10"
                                 borderColor="border-indigo-500/20"
                                 mods={trendingModpacks}
-                                onViewAll={() => { setProjectType('modpack'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
+                                onViewAll={() => handleViewAll('modpack')}
                                 labelColor="text-indigo-400"
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
@@ -278,7 +299,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 bgColor="bg-emerald-500/10"
                                 borderColor="border-emerald-500/20"
                                 mods={trendingMods}
-                                onViewAll={() => { setProjectType('mod'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
+                                onViewAll={() => handleViewAll('mod')}
                                 labelColor="text-emerald-400"
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
@@ -290,7 +311,7 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                                 bgColor="bg-amber-500/10"
                                 borderColor="border-amber-500/20"
                                 mods={trendingResourcePacks}
-                                onViewAll={() => { setProjectType('resourcepack'); setQuery(' '); setTimeout(() => setQuery(''), 50) }}
+                                onViewAll={() => handleViewAll('resourcepack')}
                                 labelColor="text-amber-400"
                                 setDetailedModId={setDetailedModId}
                                 status={serviceStatus}
@@ -300,8 +321,22 @@ export default function ModSearch({ defaultGameVersion, defaultLoader, fixedFilt
                 </div>
             ) : (
                 <div className="space-y-12">
+                    {!query && (
+                        <button
+                            onClick={() => {
+                                setViewMode('discovery');
+                                setQuery('');
+                            }}
+                            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors font-bold"
+                        >
+                            <ExternalLink className="w-4 h-4 rotate-180" /> Back to Discovery
+                        </button>
+                    )}
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-white/5 pb-8">
-                        <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight">Search Results</h2>
+                        <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight">
+                            {query ? 'Search Results' : `Browsing All ${projectTypes.find(t => t.id === projectType)?.name || 'Items'}`}
+                        </h2>
+
                         <span className="px-6 py-2 bg-white/5 rounded-full text-slate-400 font-bold border border-white/5 text-sm">
                             {totalHits.toLocaleString()} items found
                         </span>

@@ -581,7 +581,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                                 }}
                                                 className={`flex items-center justify-between p-7 bg-white/[0.02] border ${mod.enabled === false ? 'border-red-500/20 opacity-60' : 'border-white/5'} rounded-[2.2rem] hover:bg-white/[0.05] hover:border-white/10 transition-all group cursor-pointer shadow-sm relative overflow-hidden`}
                                             >
-                                                <div className="flex items-center gap-6">
+                                                <div className="flex items-center gap-6 flex-1 min-w-0">
                                                     <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0 shadow-2xl relative border border-white/5">
                                                         {mod.iconUrl ? (
                                                             <img
@@ -601,11 +601,11 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                                             <Package className="w-10 h-10 text-slate-600" />
                                                         )}
                                                     </div>
-                                                    <div className="min-w-0">
+                                                    <div className="min-w-0 flex-1">
                                                         <div className="flex items-center gap-3 mb-1">
-                                                            <p className={`text-white font-black text-xl truncate ${mod.enabled === false ? 'line-through text-slate-500' : ''}`}>{mod.name}</p>
+                                                            <p className={`text-white font-black text-xl truncate ${mod.enabled === false ? 'line-through text-slate-500' : ''}`} title={mod.name}>{mod.name}</p>
                                                             <div
-                                                                className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${sourceColor}`}
+                                                                className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${sourceColor} flex-shrink-0`}
                                                                 title={`Source: ${sourceLabel}`}
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
@@ -623,7 +623,7 @@ export default function ModpackDetails({ modpackId, onClose }: ModpackDetailsPro
                                                         <p className="text-slate-500 text-xs font-black tracking-widest uppercase truncate max-w-sm">{mod.filename}</p>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-4">
+                                                <div className="flex items-center gap-4 flex-shrink-0 ml-4">
                                                     {modpack.canEdit && (
                                                         <button
                                                             onClick={(e) => {
