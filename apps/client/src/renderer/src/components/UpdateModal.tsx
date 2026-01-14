@@ -6,7 +6,13 @@ import { Download, RefreshCw, CheckCircle } from 'lucide-react'
 export default function UpdateModal() {
     const { status, version, progress, error, installNow, dismissUpdate } = useUpdater()
     const toast = useToast()
-    const [dontAskAgain, setDontAskAgain] = useState(false)
+    const [preference, setPreference] = useState<string>('ask')
+
+    // Load preference on mount and when status changes
+    useEffect(() => {
+        const pref = localStorage.getItem('update_preference') || 'ask'
+        setPreference(pref)
+    }, [status])
 
     // Handle errors with toast
     useEffect(() => {
@@ -15,19 +21,34 @@ export default function UpdateModal() {
         }
     }, [status, error, toast])
 
-    // Auto-install logic
+    // Auto-install logic for 'always' preference
     useEffect(() => {
-        if (status === 'downloaded') {
-            const pref = localStorage.getItem('update_preference');
-            if (pref === 'always') {
-                installNow();
-            }
+        if (status === 'downloaded' && preference === 'always') {
+            // Auto-install without showing modal
+            installNow()
         }
-    }, [status]);
+    }, [status, preference, installNow])
 
-    // Don't show modal for idle, checking, available, or not-available states, or error (handled by toast)
-    if (status === 'idle' || status === 'checking' || status === 'available' || status === 'not-available' || status === 'error') {
+    // Don't show modal for:
+    // - idle, checking, available, not-available states
+    // - error (handled by toast)
+    // - if preference is 'manual' (user doesn't want to be prompted)
+    // - if preference is 'always' (auto-install handles it)
+    if (
+        status === 'idle' ||
+        status === 'checking' ||
+        status === 'available' ||
+        status === 'not-available' ||
+        status === 'error' ||
+        preference === 'manual'
+    ) {
         return null
+    }
+
+    // For 'always' preference, show a minimal downloading state
+    // but don't show the prompt - it will auto-install
+    if (preference === 'always' && status === 'downloaded') {
+        return null // Auto-install is being handled
     }
 
     // Downloading state
@@ -69,15 +90,17 @@ export default function UpdateModal() {
                     </div>
 
                     <p className="text-center text-slate-500 text-xs mt-6 font-medium">
-                        Please wait while the update downloads...
+                        {preference === 'always'
+                            ? 'The app will restart automatically after download...'
+                            : 'Please wait while the update downloads...'}
                     </p>
                 </div>
             </div>
         )
     }
 
-    // Downloaded state - ready to install
-    if (status === 'downloaded') {
+    // Downloaded state - ready to install (only for 'ask' preference)
+    if (status === 'downloaded' && preference === 'ask') {
         return (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-4">
                 <div className="bg-slate-900/95 backdrop-blur-2xl border border-white/10 rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.9)] p-10 max-w-md w-full">
@@ -96,15 +119,7 @@ export default function UpdateModal() {
                     <div className="space-y-3">
                         {/* Primary: Install Now */}
                         <button
-                            onClick={() => {
-                                // Save preference before installing
-                                if (dontAskAgain) {
-                                    localStorage.setItem('update_preference', 'always');
-                                } else {
-                                    localStorage.setItem('update_preference', 'ask');
-                                }
-                                installNow()
-                            }}
+                            onClick={() => installNow()}
                             className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black transition-all shadow-xl shadow-emerald-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
                         >
                             <RefreshCw className="w-5 h-5" />
@@ -113,33 +128,16 @@ export default function UpdateModal() {
 
                         {/* Secondary: Later */}
                         <button
-                            onClick={() => {
-                                // Save preference if checked
-                                if (dontAskAgain) {
-                                    localStorage.setItem('update_preference', 'manual');
-                                }
-                                dismissUpdate()
-                            }}
+                            onClick={() => dismissUpdate()}
                             className="w-full py-4 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-2xl font-bold transition-all active:scale-[0.98]"
                         >
                             Install Later
                         </button>
                     </div>
 
-                    {/* Don't ask again checkbox */}
-                    <div className="mt-6 flex items-center justify-center gap-3">
-                        <button
-                            onClick={() => setDontAskAgain(!dontAskAgain)}
-                            className="flex items-center gap-2 group"
-                        >
-                            <div className={`w-5 h-5 rounded-lg border-2 transition-all flex items-center justify-center ${dontAskAgain ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600 group-hover:border-slate-500 bg-transparent'}`}>
-                                {dontAskAgain && <CheckCircle className="w-3.5 h-3.5 text-white" />}
-                            </div>
-                            <span className="text-sm font-medium text-slate-500 group-hover:text-slate-400 transition-colors">
-                                Don't ask again
-                            </span>
-                        </button>
-                    </div>
+                    <p className="text-center text-slate-500 text-xs mt-6 font-medium">
+                        💡 Tip: Change auto-update behavior in Settings
+                    </p>
                 </div>
             </div>
         )
@@ -147,3 +145,4 @@ export default function UpdateModal() {
 
     return null
 }
+

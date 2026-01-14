@@ -1,0 +1,65 @@
+﻿  ÔÇó electron-builder  version=26.0.12 os=10.0.26200
+  ÔÇó loaded configuration  file=package.json ("build" field)
+  ÔÇó executing @electron/rebuild  electronVersion=39.2.7 arch=x64 buildFromSource=false appDir=./
+  ÔÇó installing native dependencies  arch=x64
+  ÔÇó completed installing native dependencies
+  ÔÇó packaging       platform=win32 arch=x64 electron=39.2.7 appOutDir=dist\win-unpacked
+node.exe : (node:29288) [DEP0190] DeprecationWarning: Passing args to a child process with 
+shell option true can lead to security vulnerabilities, as the arguments are not escaped, only 
+concatenated.
+En línea: 1 Carácter: 1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:29288) [D...y concatenated.:String) [], Remo 
+   teException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  ÔÇó updating asar integrity executable resource  executablePath=dist\win-unpacked\Nova Link.exe
+  ÔÇó signing with signtool.exe  path=dist\win-unpacked\Nova Link.exe
+  ÔÇó building        target=nsis file=dist\Nova.Link-1.1.0-win-x64.exe archs=x64 oneClick=true perMachine=false
+  ÔÇó signing with signtool.exe  path=dist\win-unpacked\resources\elevate.exe
+  ÔÇó signing with signtool.exe  path=dist\__uninstaller-nsis-nova-link.exe
+  ÔÇó signing with signtool.exe  path=dist\Nova.Link-1.1.0-win-x64.exe
+  ÔÇó building block map  blockMapFile=dist\Nova.Link-1.1.0-win-x64.exe.blockmap
+  Ô¿» Cannot cleanup: 
+
+Error #1 --------------------------------------------------------------------------------
+Error: GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+    at new GitHubPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\electron-publish\src\gitHubPublisher.ts:52:15)
+    at createPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:315:14)
+    at PublishManager.getOrCreatePublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:228:25)
+    at PublishManager.scheduleUpload (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:158:34)
+    at PublishManager.artifactCreatedWithoutExplicitPublishConfig (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:208:20)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Error #2 --------------------------------------------------------------------------------
+Error: GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+    at new GitHubPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\electron-publish\src\gitHubPublisher.ts:52:15)
+    at createPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:315:14)
+    at PublishManager.getOrCreatePublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:228:25)
+    at PublishManager.scheduleUpload (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:158:34)
+    at PublishManager.artifactCreatedWithoutExplicitPublishConfig (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:208:20)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)  failedTask=build stackTrace=Error: Cannot cleanup: 
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                Error #1 --------------------------------------------------------------------------------
+Error: GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+    at new GitHubPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\electron-publish\src\gitHubPublisher.ts:52:15)
+    at createPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:315:14)
+    at PublishManager.getOrCreatePublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:228:25)
+    at PublishManager.scheduleUpload (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:158:34)
+    at PublishManager.artifactCreatedWithoutExplicitPublishConfig (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:208:20)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                Error #2 --------------------------------------------------------------------------------
+Error: GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+    at new GitHubPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\electron-publish\src\gitHubPublisher.ts:52:15)
+    at createPublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:315:14)
+    at PublishManager.getOrCreatePublisher (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:228:25)
+    at PublishManager.scheduleUpload (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:158:34)
+    at PublishManager.artifactCreatedWithoutExplicitPublishConfig (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:208:20)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at throwError (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\builder-util\src\asyncTaskManager.ts:88:11)
+    at checkErrors (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\builder-util\src\asyncTaskManager.ts:53:9)
+    at AsyncTaskManager.awaitTasks (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\builder-util\src\asyncTaskManager.ts:58:5)
+    at PublishManager.awaitTasks (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\publish\PublishManager.ts:242:28)
+    at C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\app-builder-lib\src\index.ts:132:32
+    at executeFinally (C:\Users\alexf\Downloads\AppMinecraft\apps\client\node_modules\builder-util\src\promise.ts:23:9)

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX, RefreshCw } from 'lucide-react';
+import { Save, Folder, Cpu, CheckCircle2, Plus, Wifi, WifiOff, User, LogIn, LogOut, Loader2, Volume2, VolumeX, Download } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 
 interface MicrosoftProfile {
     name: string;
     uuid?: string;
 }
+
+// Update preference types
+type UpdatePreference = 'always' | 'ask' | 'manual';
 
 export default function Settings() {
     const [mcPath, setMcPath] = useState('');
@@ -14,7 +17,7 @@ export default function Settings() {
     const [offlineMode, setOfflineMode] = useState(false);
     const [notificationSounds, setNotificationSounds] = useState(true);
     const [amdCompatibility, setAmdCompatibility] = useState(false);
-    const [autoUpdate, setAutoUpdate] = useState(true);
+    const [updatePreference, setUpdatePreference] = useState<UpdatePreference>('ask');
     const [saved, setSaved] = useState(false);
     const toast = useToast();
 
@@ -70,10 +73,13 @@ export default function Settings() {
                 if (parsed.amdCompatibility !== undefined) setAmdCompatibility(parsed.amdCompatibility);
             }
 
-            // Load auto-update preference (stored separately)
-            const updatePref = localStorage.getItem('update_preference');
-            // 'manual' means auto-updates are disabled; anything else means enabled
-            setAutoUpdate(updatePref !== 'manual');
+            // Load update preference (stored separately)
+            const updatePref = localStorage.getItem('update_preference') as UpdatePreference;
+            if (updatePref && ['always', 'ask', 'manual'].includes(updatePref)) {
+                setUpdatePreference(updatePref);
+            } else {
+                setUpdatePreference('ask'); // Default to 'ask'
+            }
 
             // Load Microsoft profile if exists
             const msProfile = localStorage.getItem('ms_profile');
@@ -213,40 +219,111 @@ export default function Settings() {
                     </div>
                 </div>
 
-                {/* Auto-Update Toggle */}
+                {/* Update Settings Section */}
                 <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-10 rounded-[3rem] shadow-2xl group hover:border-cyan-500/20 transition-all duration-500">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-6">
-                            <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-inner ${autoUpdate ? 'bg-cyan-600/20' : 'bg-slate-700/30'}`}>
-                                <RefreshCw className={`w-8 h-8 ${autoUpdate ? 'text-cyan-500' : 'text-slate-500'}`} />
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-white tracking-tight">Automatic Updates</h2>
-                                <p className="text-slate-400 text-lg font-medium max-w-lg">
-                                    Check for updates automatically when the app starts.
-                                </p>
-                            </div>
+                    <div className="flex items-center gap-6 mb-8">
+                        <div className="w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-inner bg-cyan-600/20">
+                            <Download className="w-8 h-8 text-cyan-500" />
                         </div>
+                        <div>
+                            <h2 className="text-2xl font-black text-white tracking-tight">Update Settings</h2>
+                            <p className="text-slate-400 text-lg font-medium max-w-lg">
+                                Control how Nova Link handles updates.
+                            </p>
+                        </div>
+                    </div>
 
-                        {/* Toggle Switch */}
+                    {/* Radio Options */}
+                    <div className="space-y-4">
+                        {/* Option 1: Always */}
                         <button
                             type="button"
                             onClick={() => {
-                                const newValue = !autoUpdate;
-                                setAutoUpdate(newValue);
-                                // Save preference immediately
-                                localStorage.setItem('update_preference', newValue ? 'ask' : 'manual');
+                                setUpdatePreference('always');
+                                localStorage.setItem('update_preference', 'always');
                             }}
-                            className={`relative w-20 h-10 rounded-full transition-all duration-300 ${autoUpdate ? 'bg-cyan-500' : 'bg-slate-700'}`}
+                            className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${updatePreference === 'always'
+                                ? 'border-cyan-500 bg-cyan-500/10'
+                                : 'border-white/10 bg-white/5 hover:border-white/20'
+                                }`}
                         >
-                            <div className={`absolute top-1 w-8 h-8 bg-white rounded-full shadow-lg transition-all duration-300 ${autoUpdate ? 'left-11' : 'left-1'}`} />
+                            <div className="flex items-center gap-4">
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${updatePreference === 'always' ? 'border-cyan-500 bg-cyan-500' : 'border-slate-500'
+                                    }`}>
+                                    {updatePreference === 'always' && <div className="w-2 h-2 rounded-full bg-white" />}
+                                </div>
+                                <div>
+                                    <p className={`font-bold ${updatePreference === 'always' ? 'text-cyan-400' : 'text-white'}`}>
+                                        Always install automatically
+                                    </p>
+                                    <p className="text-slate-500 text-sm">
+                                        Download and install updates without asking. The app will restart automatically.
+                                    </p>
+                                </div>
+                            </div>
+                        </button>
+
+                        {/* Option 2: Ask */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setUpdatePreference('ask');
+                                localStorage.setItem('update_preference', 'ask');
+                            }}
+                            className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${updatePreference === 'ask'
+                                ? 'border-cyan-500 bg-cyan-500/10'
+                                : 'border-white/10 bg-white/5 hover:border-white/20'
+                                }`}
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${updatePreference === 'ask' ? 'border-cyan-500 bg-cyan-500' : 'border-slate-500'
+                                    }`}>
+                                    {updatePreference === 'ask' && <div className="w-2 h-2 rounded-full bg-white" />}
+                                </div>
+                                <div>
+                                    <p className={`font-bold ${updatePreference === 'ask' ? 'text-cyan-400' : 'text-white'}`}>
+                                        Ask before installing
+                                    </p>
+                                    <p className="text-slate-500 text-sm">
+                                        Download updates and show a prompt to install. You choose when to restart.
+                                    </p>
+                                </div>
+                            </div>
+                        </button>
+
+                        {/* Option 3: Manual */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setUpdatePreference('manual');
+                                localStorage.setItem('update_preference', 'manual');
+                            }}
+                            className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${updatePreference === 'manual'
+                                ? 'border-cyan-500 bg-cyan-500/10'
+                                : 'border-white/10 bg-white/5 hover:border-white/20'
+                                }`}
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${updatePreference === 'manual' ? 'border-cyan-500 bg-cyan-500' : 'border-slate-500'
+                                    }`}>
+                                    {updatePreference === 'manual' && <div className="w-2 h-2 rounded-full bg-white" />}
+                                </div>
+                                <div>
+                                    <p className={`font-bold ${updatePreference === 'manual' ? 'text-cyan-400' : 'text-white'}`}>
+                                        Never check automatically
+                                    </p>
+                                    <p className="text-slate-500 text-sm">
+                                        Only check for updates manually using the "Check Updates" button.
+                                    </p>
+                                </div>
+                            </div>
                         </button>
                     </div>
 
-                    {!autoUpdate && (
-                        <div className="mt-6 p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
-                            <p className="text-cyan-400 text-sm font-medium">
-                                ℹ️ Automatic updates disabled. Use the "Check Updates" button in the sidebar to manually check for new versions.
+                    {updatePreference === 'manual' && (
+                        <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                            <p className="text-amber-400 text-sm font-medium">
+                                ⚠️ You won't receive updates automatically. Check for updates manually from the sidebar.
                             </p>
                         </div>
                     )}
