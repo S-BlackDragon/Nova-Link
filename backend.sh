@@ -270,8 +270,9 @@ db_list_modpacks() {
     check_db_running || return
     print_header
     echo -e "${CYAN}═══ All Modpacks ═══${NC}\n"
+    # Note: gameVersion and loader are now in ModpackVersion table
     docker exec nova_link_db psql -U admin -d launcher_db -c \
-        "SELECT id, name, \"gameVersion\", loader, \"modCount\", \"createdAt\" FROM \"Modpack\" ORDER BY \"createdAt\" DESC LIMIT 50;"
+        "SELECT id, name, \"authorId\", \"isPublic\", \"createdAt\" FROM \"Modpack\" ORDER BY \"createdAt\" DESC LIMIT 50;"
     wait_for_key
 }
 
