@@ -133,19 +133,29 @@ update_backend() {
     print_header
     echo -e "${CYAN}═══ Updating Backend ═══${NC}\n"
     
-    echo -e "${YELLOW}Step 1/4: Pulling latest code from GitHub...${NC}"
-    git pull origin main
+    echo -e "${YELLOW}Step 1/5: Discarding local changes...${NC}"
+    git checkout -- . 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
     
-    echo -e "\n${YELLOW}Step 2/4: Stopping current containers...${NC}"
+    echo -e "${YELLOW}Step 2/5: Pulling latest code from GitHub...${NC}"
+    if ! git pull origin main; then
+        echo -e "\n${RED}✗ Failed to pull from GitHub${NC}"
+        wait_for_key
+        return
+    fi
+    
+    echo -e "\n${YELLOW}Step 3/5: Stopping current containers...${NC}"
     docker compose -f $COMPOSE_FILE down
     
-    echo -e "\n${YELLOW}Step 3/4: Rebuilding backend image...${NC}"
+    echo -e "\n${YELLOW}Step 4/5: Rebuilding backend image...${NC}"
     docker compose -f $COMPOSE_FILE build --no-cache backend
     
-    echo -e "\n${YELLOW}Step 4/4: Starting updated services...${NC}"
-    docker compose -f $COMPOSE_FILE up -d
-    
-    echo -e "\n${GREEN}✓ Backend updated successfully!${NC}"
+    echo -e "\n${YELLOW}Step 5/5: Starting updated services...${NC}"
+    if docker compose -f $COMPOSE_FILE up -d; then
+        echo -e "\n${GREEN}✓ Backend updated successfully!${NC}"
+    else
+        echo -e "\n${RED}✗ Error starting services${NC}"
+    fi
     wait_for_key
 }
 
@@ -153,8 +163,15 @@ quick_update() {
     print_header
     echo -e "${CYAN}═══ Quick Update (without rebuild) ═══${NC}\n"
     
+    echo -e "${YELLOW}Discarding local changes...${NC}"
+    git checkout -- . 2>/dev/null || true
+    
     echo -e "${YELLOW}Pulling latest code...${NC}"
-    git pull origin main
+    if ! git pull origin main; then
+        echo -e "\n${RED}✗ Failed to pull from GitHub${NC}"
+        wait_for_key
+        return
+    fi
     
     echo -e "\n${YELLOW}Restarting services...${NC}"
     docker compose -f $COMPOSE_FILE restart

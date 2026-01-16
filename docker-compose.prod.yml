@@ -1,4 +1,4 @@
-version: '3.8'
+# Nova Link Backend - Docker Compose Production
 
 services:
   # Database Service
