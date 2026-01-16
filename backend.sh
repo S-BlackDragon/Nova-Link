@@ -311,17 +311,47 @@ db_delete_user() {
     echo ""
     read -p "Enter user ID to delete (or 'cancel'): " user_id
     
-    if [ "$user_id" = "cancel" ]; then
+    if [ "$user_id" = "cancel" ] || [ -z "$user_id" ]; then
         return
     fi
     
-    echo -e "\n${RED}WARNING: This will permanently delete the user and all their data!${NC}"
-    read -p "Are you sure? (yes/no): " confirm
+    echo -e "\n${YELLOW}Choose deletion mode:${NC}"
+    echo -e "  1) Safe Delete (Fails if user has modpacks/groups)"
+    echo -e "  2) ${RED}Force Cascade Delete (REMOVES ALL User's Modpacks, Groups, etc.)${NC}"
+    read -p "Select option: " del_mode
+
+    echo -e "\n${RED}WARNING: This action is irreversible!${NC}"
+    if [ "$del_mode" = "2" ]; then
+         echo -e "${RED}You are about to delete a user AND ALL THEIR CREATED CONTENT.${NC}"
+    fi
+    read -p "Are you sure? (type 'yes' to confirm): " confirm
     
     if [ "$confirm" = "yes" ]; then
-        docker exec nova_link_db psql -U admin -d launcher_db -c \
-            "DELETE FROM \"User\" WHERE id = '$user_id';"
-        echo -e "\n${GREEN}✓ User deleted successfully${NC}"
+        if [ "$del_mode" = "2" ]; then
+             echo -e "\n${YELLOW}Executing Cascade Delete...${NC}"
+             # Start transaction block for cascade delete
+             # 1. Remove memberships, 2. Remove modpacks (cascades to versions/mods), 3. Remove groups (cascades to members), 4. Remove user
+             CMD="BEGIN;
+                  DELETE FROM \"GroupMember\" WHERE \"userId\" = '$user_id';
+                  DELETE FROM \"Modpack\" WHERE \"authorId\" = '$user_id';
+                  DELETE FROM \"Group\" WHERE \"ownerId\" = '$user_id';
+                  DELETE FROM \"User\" WHERE id = '$user_id';
+                  COMMIT;"
+             
+             if docker exec nova_link_db psql -U admin -d launcher_db -c "$CMD"; then
+                 echo -e "\n${GREEN}✓ User and all associated data deleted successfully${NC}"
+             else
+                 echo -e "\n${RED}✗ Error during cascade delete. Transaction rolled back.${NC}"
+             fi
+        else
+             # Standard delete
+             if docker exec nova_link_db psql -U admin -d launcher_db -c "DELETE FROM \"User\" WHERE id = '$user_id';"; then
+                 echo -e "\n${GREEN}✓ User deleted successfully${NC}"
+             else
+                 echo -e "\n${RED}✗ Database error. User likely has Modpacks or Groups.${NC}"
+                 echo -e "${YELLOW}Tip: Use 'Force Cascade Delete' to clean up dependencies automatically.${NC}"
+             fi
+        fi
     else
         echo -e "\n${YELLOW}Cancelled${NC}"
     fi
