@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { User, Mail, Lock, Camera, X, Check, Loader2, AlertCircle, RefreshCw, Key, Upload } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api';
+import { getAvatarUrl } from '../../utils/avatarHelper';
 
 interface UserProfileProps {
     isOpen: boolean;
@@ -251,8 +252,8 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
                                 <div className="flex items-center gap-6 mb-8">
                                     <div className="relative group">
                                         <div className="w-24 h-24 bg-gradient-to-br from-slate-700 to-slate-800 rounded-3xl flex items-center justify-center border-2 border-white/10 shadow-xl overflow-hidden">
-                                            {avatarUrl ? (
-                                                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                                            {getAvatarUrl(avatarUrl) ? (
+                                                <img src={getAvatarUrl(avatarUrl)!} alt="Avatar" className="w-full h-full object-cover" />
                                             ) : (
                                                 <span className="text-white font-black text-3xl">{username?.[0]?.toUpperCase()}</span>
                                             )}

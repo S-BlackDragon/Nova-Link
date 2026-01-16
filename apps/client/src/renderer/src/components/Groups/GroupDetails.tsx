@@ -4,6 +4,7 @@ import { API_BASE_URL } from '../../config/api';
 import { X, User, Shield, Trash2, Copy, LogOut, Crown, ArrowRightLeft } from 'lucide-react';
 import { ChangeTargetModal } from './ChangeTargetModal';
 import { DeleteConfirmationModal } from '../Modpacks/DeleteConfirmationModal';
+import { getAvatarUrl } from '../../utils/avatarHelper';
 
 interface Member {
     id: string;
@@ -264,8 +265,8 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                             {group.members.map((member: Member) => (
                                 <div key={member.id} className="flex items-center justify-between p-3 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/50 transition-colors">
                                     <div className="flex items-center gap-3">
-                                        {member.user.avatarUrl ? (
-                                            <img src={member.user.avatarUrl} alt={member.user.username} className="w-8 h-8 rounded-full bg-zinc-700" />
+                                        {getAvatarUrl(member.user.avatarUrl) ? (
+                                            <img src={getAvatarUrl(member.user.avatarUrl)!} alt={member.user.username} className="w-8 h-8 rounded-full bg-zinc-700" />
                                         ) : (
                                             <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center">
                                                 <User size={14} className="text-zinc-400" />
@@ -351,8 +352,8 @@ export const GroupDetails: React.FC<GroupDetailsProps> = ({ groupId, onClose }) 
                                         onClick={() => transferOwnership(member.user.id, member.user.username)}
                                         className="w-full flex items-center gap-3 p-3 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:bg-amber-500/10 hover:border-amber-500/30 transition-colors text-left"
                                     >
-                                        {member.user.avatarUrl ? (
-                                            <img src={member.user.avatarUrl} alt={member.user.username} className="w-8 h-8 rounded-full bg-zinc-700" />
+                                        {getAvatarUrl(member.user.avatarUrl) ? (
+                                            <img src={getAvatarUrl(member.user.avatarUrl)!} alt={member.user.username} className="w-8 h-8 rounded-full bg-zinc-700" />
                                         ) : (
                                             <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center">
                                                 <User size={14} className="text-zinc-400" />
