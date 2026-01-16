@@ -13,6 +13,7 @@ import { DeleteConfirmationModal } from './Modpacks/DeleteConfirmationModal';
 import UserProfile from './Auth/UserProfile';
 import { useLogs } from '../contexts/LogContext';
 import { useToast } from '../contexts/ToastContext';
+import { getAvatarUrl } from '../utils/avatarHelper';
 
 interface DashboardProps {
   user: any;
@@ -304,8 +305,8 @@ export default function Dashboard({ user, onLogout, onUserUpdate }: DashboardPro
             title="View Profile"
           >
             <div className="w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-slate-700 to-slate-800 rounded-xl lg:rounded-2xl flex items-center justify-center border border-white/10 shadow-lg flex-shrink-0 overflow-hidden group-hover/user:border-indigo-500/50 transition-colors">
-              {user?.avatarUrl ? (
-                <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              {getAvatarUrl(user?.avatarUrl) ? (
+                <img src={getAvatarUrl(user?.avatarUrl)!} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
                 <span className="text-white font-black text-lg lg:text-xl">{user?.username?.[0]?.toUpperCase() || 'U'}</span>
               )}

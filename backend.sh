@@ -210,7 +210,18 @@ logs_menu() {
 #  Database Management
 # ═══════════════════════════════════════════════════════════════════════════════
 
+check_db_running() {
+    if ! docker ps --format '{{.Names}}' | grep -q "nova_link_db"; then
+        echo -e "${RED}Error: Database container is not running!${NC}"
+        echo -e "${YELLOW}Please start services first (option 1 or f).${NC}"
+        wait_for_key
+        return 1
+    fi
+    return 0
+}
+
 db_shell() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ PostgreSQL Shell ═══${NC}"
     echo -e "${YELLOW}Type \\q to exit${NC}\n"
@@ -218,6 +229,7 @@ db_shell() {
 }
 
 db_list_users() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ All Users ═══${NC}\n"
     docker exec nova_link_db psql -U admin -d launcher_db -c \
@@ -226,6 +238,7 @@ db_list_users() {
 }
 
 db_list_modpacks() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ All Modpacks ═══${NC}\n"
     docker exec nova_link_db psql -U admin -d launcher_db -c \
@@ -234,6 +247,7 @@ db_list_modpacks() {
 }
 
 db_list_groups() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ All Groups ═══${NC}\n"
     docker exec nova_link_db psql -U admin -d launcher_db -c \
@@ -242,6 +256,7 @@ db_list_groups() {
 }
 
 db_count_all() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ Database Statistics ═══${NC}\n"
     echo -e "${WHITE}Users:${NC}"
@@ -256,6 +271,7 @@ db_count_all() {
 }
 
 db_delete_user() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ Delete User ═══${NC}\n"
     
@@ -284,6 +300,7 @@ db_delete_user() {
 }
 
 db_reset_user_password() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ Reset User Password ═══${NC}\n"
     echo -e "${YELLOW}Note: This sets a temporary password. User should change it after login.${NC}\n"
@@ -308,6 +325,7 @@ db_reset_user_password() {
 }
 
 db_custom_query() {
+    check_db_running || return
     print_header
     echo -e "${CYAN}═══ Custom SQL Query ═══${NC}\n"
     echo -e "${YELLOW}Available tables: User, Modpack, Mod, Group, GroupMember, GroupInvite${NC}\n"

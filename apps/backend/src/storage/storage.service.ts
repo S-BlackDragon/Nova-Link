@@ -44,7 +44,9 @@ export class StorageService {
             expiresIn: 300, // 5 minutes
         });
 
-        const publicUrl = `${this.publicUrl}/${this.bucket}/${key}`;
+        // Return relative path - client will construct full URL
+        // Format: /avatars/userId/filename.ext
+        const publicUrl = `/${this.bucket}/${key}`;
 
         return { uploadUrl, key, publicUrl };
     }
