@@ -1,14 +1,14 @@
-# Release Notes - v1.0.49
+# Release Notes - v1.3.1
 
 ## 🌟 Highlights
 
-*   **Service Status Monitoring**: Added real-time status checks for Modrinth services.
-*   **Improved Error Handling**: Friendly "Service Unavailable" messages when discovery services are down.
-*   **Avatar System**: Fully integrated MinIO object storage for fast and secure avatar uploads.
+*   **Robust Backend Management**: Significantly improved the server management script (`backend.sh`) with auto-updates, container health checks, and better error handling.
+*   **Avatar System Fixes**: Resolved issues with avatar display URLs by migrating to relative paths and specific frontend helpers.
+*   **Database Tools**: Enhanced database management tools directly within the management CLI for easier debugging.
 
 ## 🚀 Changes
 
-*   [Feature] Added "Modrinth Service Status" indicator to Mod Discovery Hub.
-*   [Feature] Implemented "Temporarily Unavailable" placeholder for empty trending lists during outages.
-*   [Fix] Added backend `/status` endpoint to ping Modrinth API.
-*   [Chore] Bumped version to 1.0.49.
+*   [Fix] `backend.sh` now automatically discards local changes before pulling updates to prevent merge conflicts.
+*   [Fix] Added checks to ensure the database container is running before attempting database operations in the CLI.
+*   [Fix] Updated frontend components (`UserProfile`, `GroupDetails`, `Dashboard`) to correctly construct avatar URLs from relative paths.
+*   [Fix] `docker-compose.prod.yml` updated to remove obsolete version attributes.
