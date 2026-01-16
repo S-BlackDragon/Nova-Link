@@ -414,8 +414,55 @@ db_reset_user_password() {
         echo -e "${WHITE}User ID:      ${NC}$user_id"
         echo -e "${WHITE}New Password: ${NC}${GREEN}$new_pass${NC}"
         echo -e "${CYAN}════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}IMPORTANT: Please securely send this password to the user via email.${NC}"
-        echo -e "${YELLOW}(Automatic email sending is not implemented in this CLI)${NC}"
+        
+        # Attempt to get email to send notification
+        user_email=$(docker exec nova_link_db psql -U admin -d launcher_db -t -c "SELECT email FROM \"User\" WHERE id = '$user_id';" | tr -d '[:space:]')
+        
+        if [ -n "$user_email" ]; then
+             echo -e "\n${YELLOW}User Email: $user_email${NC}"
+             read -p "Send new password via email using backend service? (y/n): " send_mail
+             if [ "$send_mail" = "y" ]; then
+                 echo -e "${YELLOW}Injecting email script into backend container...${NC}"
+                 docker exec nova_link_api node -e "
+                    const nodemailer = require('nodemailer');
+                    const user = process.env.GMAIL_USER;
+                    const pass = process.env.GMAIL_APP_PASSWORD;
+                    
+                    if(!user || !pass) { 
+                        console.error('Error: GMAIL_USER/PASS not set in backend env'); 
+                        process.exit(1); 
+                    }
+                    
+                    const transporter = nodemailer.createTransport({
+                        service: 'gmail',
+                        auth: { user, pass }
+                    });
+                    
+                    transporter.sendMail({
+                        from: user,
+                        to: process.argv[1],
+                        subject: 'Security Update: New Password',
+                        html: \`<div style='font-family: sans-serif; padding: 20px; color: #333;'>
+                                <h2>Password Reset</h2>
+                                <p>An administrator has manually reset your Nova Link password.</p>
+                                <div style='background: #f1f5f9; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 20px; color: #0f172a; letter-spacing: 1px;'>
+                                    \${process.argv[2]}
+                                </div>
+                                <p>Please log in and change this password immediately.</p>
+                                </div>\`
+                    }, (err, info) => {
+                        if(err) { console.error(err.message); process.exit(1); }
+                        else { console.log('Sent: ' + info.response); process.exit(0); }
+                    });
+                 " "$user_email" "$new_pass"
+                 
+                 if [ $? -eq 0 ]; then
+                     echo -e "${GREEN}✓ Email sent successfully!${NC}"
+                 else
+                     echo -e "${RED}✗ Failed to send email. Check backend logs.${NC}"
+                 fi
+             fi
+        fi
     else
         echo -e "\n${RED}✗ Failed to update database${NC}"
     fi
