@@ -363,24 +363,62 @@ db_reset_user_password() {
     check_db_running || return
     print_header
     echo -e "${CYAN}═══ Reset User Password ═══${NC}\n"
-    echo -e "${YELLOW}Note: This sets a temporary password. User should change it after login.${NC}\n"
     
     # List users
     docker exec nova_link_db psql -U admin -d launcher_db -c \
         "SELECT id, username, email FROM \"User\" ORDER BY \"createdAt\" DESC LIMIT 20;"
     
     echo ""
-    read -p "Enter user email: " user_email
+    read -p "Enter user ID (or 'cancel'): " user_id
     
-    # Generate bcrypt hash for 'TempPass123!' 
-    # This is pre-computed for simplicity
-    TEMP_HASH='\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.6FpEMDBqI.Q6Oi'
+    if [ "$user_id" = "cancel" ] || [ -z "$user_id" ]; then
+        return
+    fi
     
-    docker exec nova_link_db psql -U admin -d launcher_db -c \
-        "UPDATE \"User\" SET \"passwordHash\" = '$TEMP_HASH' WHERE email = '$user_email';"
+    echo -e "\n${YELLOW}Password Option:${NC}"
+    echo -e "  1) Manually enter password"
+    echo -e "  2) Generate random secure password"
+    read -p "Select option: " pass_opt
+
+    if [ "$pass_opt" = "1" ]; then
+        read -p "Enter new password: " new_pass
+        if [ -z "$new_pass" ]; then echo -e "${RED}Password cannot be empty${NC}"; wait_for_key; return; fi
+    elif [ "$pass_opt" = "2" ]; then
+        # Generate random password (12 chars, alphanumeric)
+        if command -v openssl &> /dev/null; then
+            new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+        else
+            new_pass="Nova$(date +%s | tail -c 6)"
+        fi
+    else
+        return
+    fi
+
+    echo -e "\n${YELLOW}Generating hash via backend...${NC}"
+    # Use backend container to generate valid bcrypt hash safely
+    hash=$(docker exec nova_link_api node -e "console.log(require('bcrypt').hashSync(process.argv[1], 10))" "$new_pass" 2>/dev/null)
     
-    echo -e "\n${GREEN}✓ Password reset to: TempPass123!${NC}"
-    echo -e "${YELLOW}Tell the user to change it immediately after login.${NC}"
+    # Validation: bcrypt hashes start with $2a$ or $2b$ and are ~60 chars
+    if [[ "$hash" != \$2* ]] || [ ${#hash} -lt 50 ]; then
+        echo -e "${RED}Error: Failed to generate hash using backend container.${NC}"
+        echo -e "Debug output: $hash"
+        echo -e "${YELLOW}Ensure backend service is running (Option 1).${NC}"
+        wait_for_key
+        return
+    fi
+
+    # Update DB
+    if docker exec nova_link_db psql -U admin -d launcher_db -c "UPDATE \"User\" SET \"passwordHash\" = '$hash' WHERE id = '$user_id';"; then
+        echo -e "\n${GREEN}✓ Password reset successfully!${NC}"
+        echo -e "\n${CYAN}════════════════════════════════════════${NC}"
+        echo -e "${WHITE}User ID:      ${NC}$user_id"
+        echo -e "${WHITE}New Password: ${NC}${GREEN}$new_pass${NC}"
+        echo -e "${CYAN}════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}IMPORTANT: Please securely send this password to the user via email.${NC}"
+        echo -e "${YELLOW}(Automatic email sending is not implemented in this CLI)${NC}"
+    else
+        echo -e "\n${RED}✗ Failed to update database${NC}"
+    fi
     wait_for_key
 }
 
