@@ -73,24 +73,55 @@ wait_for_key() {
 start_services() {
     print_header
     echo -e "${GREEN}Starting services...${NC}\n"
-    docker compose -f $COMPOSE_FILE up -d
-    echo -e "\n${GREEN}✓ Services started successfully!${NC}"
+    if docker compose -f $COMPOSE_FILE up -d; then
+        echo -e "\n${GREEN}✓ Services started successfully!${NC}"
+    else
+        echo -e "\n${RED}✗ Error starting services. Try 'Force restart' option.${NC}"
+    fi
     wait_for_key
 }
 
 stop_services() {
     print_header
     echo -e "${YELLOW}Stopping services...${NC}\n"
-    docker compose -f $COMPOSE_FILE down
-    echo -e "\n${GREEN}✓ Services stopped successfully!${NC}"
+    if docker compose -f $COMPOSE_FILE down; then
+        echo -e "\n${GREEN}✓ Services stopped successfully!${NC}"
+    else
+        echo -e "\n${RED}✗ Error stopping services${NC}"
+    fi
     wait_for_key
 }
 
 restart_services() {
     print_header
     echo -e "${YELLOW}Restarting services...${NC}\n"
-    docker compose -f $COMPOSE_FILE restart
-    echo -e "\n${GREEN}✓ Services restarted successfully!${NC}"
+    if docker compose -f $COMPOSE_FILE restart; then
+        echo -e "\n${GREEN}✓ Services restarted successfully!${NC}"
+    else
+        echo -e "\n${RED}✗ Error restarting services. Try 'Force restart' option.${NC}"
+    fi
+    wait_for_key
+}
+
+force_restart() {
+    print_header
+    echo -e "${RED}═══ Force Restart (Clean Start) ═══${NC}\n"
+    
+    echo -e "${YELLOW}Step 1/4: Stopping all Nova Link containers...${NC}"
+    docker stop nova_link_api nova_link_db 2>/dev/null || true
+    
+    echo -e "${YELLOW}Step 2/4: Removing old containers...${NC}"
+    docker rm nova_link_api nova_link_db 2>/dev/null || true
+    
+    echo -e "${YELLOW}Step 3/4: Cleaning up...${NC}"
+    docker compose -f $COMPOSE_FILE down --remove-orphans 2>/dev/null || true
+    
+    echo -e "${YELLOW}Step 4/4: Starting fresh...${NC}"
+    if docker compose -f $COMPOSE_FILE up -d; then
+        echo -e "\n${GREEN}✓ Services started successfully!${NC}"
+    else
+        echo -e "\n${RED}✗ Error starting services${NC}"
+    fi
     wait_for_key
 }
 
@@ -403,6 +434,7 @@ main_menu() {
         echo -e "  ${WHITE}1)${NC} Start services"
         echo -e "  ${WHITE}2)${NC} Stop services"
         echo -e "  ${WHITE}3)${NC} Restart services"
+        echo -e "  ${WHITE}f)${NC} Force restart (fix stuck containers)"
         echo ""
         echo -e "  ${YELLOW}🔄 Updates${NC}"
         echo -e "  ${WHITE}4)${NC} Full update (pull + rebuild)"
@@ -425,6 +457,7 @@ main_menu() {
             1) start_services ;;
             2) stop_services ;;
             3) restart_services ;;
+            f|F) force_restart ;;
             4) update_backend ;;
             5) quick_update ;;
             6) logs_menu ;;
