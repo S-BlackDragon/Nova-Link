@@ -129,10 +129,20 @@ force_restart() {
 #  Update Functions
 # ═══════════════════════════════════════════════════════════════════════════════
 
+fix_git_permissions() {
+    # If running as root via sudo, fix permissions so git works for the user later
+    if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
+        echo -e "${YELLOW}Fixing git permissions...${NC}"
+        chown -R "$SUDO_USER:$(id -gn $SUDO_USER)" .git 2>/dev/null || true
+    fi
+}
+
 update_backend() {
     print_header
     echo -e "${CYAN}═══ Updating Backend ═══${NC}\n"
     
+    fix_git_permissions
+
     echo -e "${YELLOW}Step 1/5: Discarding local changes...${NC}"
     git checkout -- . 2>/dev/null || true
     git clean -fd 2>/dev/null || true
@@ -163,6 +173,8 @@ quick_update() {
     print_header
     echo -e "${CYAN}═══ Quick Update (without rebuild) ═══${NC}\n"
     
+    fix_git_permissions
+
     echo -e "${YELLOW}Discarding local changes...${NC}"
     git checkout -- . 2>/dev/null || true
     
