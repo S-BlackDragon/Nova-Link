@@ -73,7 +73,7 @@ wait_for_key() {
 start_services() {
     print_header
     echo -e "${GREEN}Starting services...${NC}\n"
-    docker-compose -f $COMPOSE_FILE up -d
+    docker compose -f $COMPOSE_FILE up -d
     echo -e "\n${GREEN}✓ Services started successfully!${NC}"
     wait_for_key
 }
@@ -81,7 +81,7 @@ start_services() {
 stop_services() {
     print_header
     echo -e "${YELLOW}Stopping services...${NC}\n"
-    docker-compose -f $COMPOSE_FILE down
+    docker compose -f $COMPOSE_FILE down
     echo -e "\n${GREEN}✓ Services stopped successfully!${NC}"
     wait_for_key
 }
@@ -89,7 +89,7 @@ stop_services() {
 restart_services() {
     print_header
     echo -e "${YELLOW}Restarting services...${NC}\n"
-    docker-compose -f $COMPOSE_FILE restart
+    docker compose -f $COMPOSE_FILE restart
     echo -e "\n${GREEN}✓ Services restarted successfully!${NC}"
     wait_for_key
 }
@@ -106,13 +106,13 @@ update_backend() {
     git pull origin main
     
     echo -e "\n${YELLOW}Step 2/4: Stopping current containers...${NC}"
-    docker-compose -f $COMPOSE_FILE down
+    docker compose -f $COMPOSE_FILE down
     
     echo -e "\n${YELLOW}Step 3/4: Rebuilding backend image...${NC}"
-    docker-compose -f $COMPOSE_FILE build --no-cache backend
+    docker compose -f $COMPOSE_FILE build --no-cache backend
     
     echo -e "\n${YELLOW}Step 4/4: Starting updated services...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d
+    docker compose -f $COMPOSE_FILE up -d
     
     echo -e "\n${GREEN}✓ Backend updated successfully!${NC}"
     wait_for_key
@@ -126,7 +126,7 @@ quick_update() {
     git pull origin main
     
     echo -e "\n${YELLOW}Restarting services...${NC}"
-    docker-compose -f $COMPOSE_FILE restart
+    docker compose -f $COMPOSE_FILE restart
     
     echo -e "\n${GREEN}✓ Quick update completed!${NC}"
     wait_for_key
@@ -139,7 +139,7 @@ quick_update() {
 view_logs() {
     print_header
     echo -e "${CYAN}═══ Live Logs (Ctrl+C to exit) ═══${NC}\n"
-    docker-compose -f $COMPOSE_FILE logs -f --tail=100
+    docker compose -f $COMPOSE_FILE logs -f --tail=100
 }
 
 view_backend_logs() {
