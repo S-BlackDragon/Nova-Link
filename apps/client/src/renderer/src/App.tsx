@@ -31,10 +31,23 @@ function App(): React.JSX.Element {
   const tokenValidatedRef = useRef(false);
 
   useEffect(() => {
-    // Response interceptor for session expiry
+    // Response interceptor for session expiry and error sanitization
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
+        // Sanitize sensitive IP addresses from error messages
+        const sanitizeError = (txt: any) => {
+          if (typeof txt === 'string') {
+            return txt.replace(/163\.192\.96\.105/g, 'remote-server').replace(/:\d{4}/g, '');
+          }
+          return txt;
+        };
+
+        if (error.message) error.message = sanitizeError(error.message);
+        if (error.response?.data?.message) {
+          error.response.data.message = sanitizeError(error.response.data.message);
+        }
+
         // Only trigger logout on 401 if:
         // 1. Auth has been restored (not during initialization)
         // 2. Token has been validated with server at least once

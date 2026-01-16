@@ -37,7 +37,18 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
     useEffect(() => {
         if (user) {
             setUsername(user.username);
-            setAvatarUrl(user.avatarUrl || '');
+
+            // Sanitize URL if it contains the server IP (legacy data fix)
+            let av = user.avatarUrl || '';
+            if (av.includes('163.192.96.105')) {
+                try {
+                    // Extract relative path
+                    av = av.replace(/https?:\/\/163\.192\.96\.105(:\d+)?/, '');
+                } catch (e) {
+                    console.error('Failed to sanitize avatar URL', e);
+                }
+            }
+            setAvatarUrl(av);
         }
     }, [user]);
 
@@ -104,6 +115,13 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
             setAvatarUrl(confirmResponse.data.avatarUrl);
             onUpdate(confirmResponse.data);
             setSuccess('Avatar uploaded successfully!');
+
+            // Sanitize in case backend is outdated
+            const freshUrl = confirmResponse.data.avatarUrl;
+            const cleanUrl = freshUrl.replace(/https?:\/\/163\.192\.96\.105(:\d+)?/, '');
+
+            setAvatarUrl(cleanUrl);
+            onUpdate({ ...confirmResponse.data, avatarUrl: cleanUrl });
         } catch (err: any) {
             console.error('Upload failed:', err);
             setError(err.response?.data?.message || 'Failed to upload avatar');
