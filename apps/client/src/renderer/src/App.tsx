@@ -27,16 +27,25 @@ function App(): React.JSX.Element {
 
   // Track if auth has been restored from localStorage to avoid premature logout on 401
   const authRestoredRef = useRef(false);
+  // Track if we've validated the token with the server
+  const tokenValidatedRef = useRef(false);
 
   useEffect(() => {
     // Response interceptor for session expiry
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
-        // Only trigger logout on 401 if auth has been restored (not during initialization)
-        // This prevents the "Fetch Failed" error on startup when token hasn't loaded yet
-        if (error.response?.status === 401 && authRestoredRef.current) {
+        // Only trigger logout on 401 if:
+        // 1. Auth has been restored (not during initialization)
+        // 2. Token has been validated with server at least once
+        // 3. It's actually a 401 response (not a network error)
+        if (error.response?.status === 401 && authRestoredRef.current && tokenValidatedRef.current) {
+          console.log('[App] Token expired or invalid, logging out...');
           handleLogout();
+        }
+        // For network errors (no response), don't logout - keep stored credentials
+        if (!error.response) {
+          console.warn('[App] Network error - keeping stored credentials');
         }
         return Promise.reject(error);
       }
@@ -80,7 +89,47 @@ function App(): React.JSX.Element {
   useEffect(() => {
     // Startup initialization
     const initApp = async () => {
-      // 1. Check for updates immediately (unless preference is manual)
+      // 1. Restore saved auth first
+      const savedToken = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        setUser(JSON.parse(savedUser));
+
+        // 2. Refresh token with server - extends expiration for another 30 days
+        try {
+          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {}, {
+            headers: { Authorization: `Bearer ${savedToken}` }
+          });
+          // Update with fresh token
+          const newToken = response.data.access_token;
+          const newUser = response.data.user;
+          localStorage.setItem('token', newToken);
+          localStorage.setItem('user', JSON.stringify(newUser));
+          setToken(newToken);
+          setUser(newUser);
+          console.log('[App] Token refreshed successfully - session extended');
+          tokenValidatedRef.current = true;
+        } catch (err: any) {
+          if (err.response?.status === 401) {
+            // Token is actually expired - clear credentials
+            console.log('[App] Saved token is invalid, clearing credentials');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setToken(null);
+            setUser(null);
+          } else {
+            // Network error - keep credentials, user can work offline or retry
+            console.warn('[App] Could not refresh token (network issue), keeping credentials');
+            tokenValidatedRef.current = true; // Allow app to work
+          }
+        }
+      }
+
+      // Mark auth as restored
+      authRestoredRef.current = true;
+
+      // 3. Check for updates (unless preference is manual)
       try {
         const updatePref = localStorage.getItem('update_preference');
         if (updatePref !== 'manual') {
@@ -90,22 +139,13 @@ function App(): React.JSX.Element {
         console.error('Failed to check updates on startup:', err);
       }
 
-      // 2. Artificial delay (minimum 3s) as requested for UX
+      // 4. Artificial delay (minimum 3s) as requested for UX
       setTimeout(() => {
         setIsInitializing(false);
       }, 4000); // 4 seconds fixed delay
     };
 
     initApp();
-
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
-    }
-    // Mark auth as restored - now 401 interceptor can trigger logout
-    authRestoredRef.current = true;
   }, []);
 
   const handleAuthSuccess = (newToken: string, newUser: any) => {

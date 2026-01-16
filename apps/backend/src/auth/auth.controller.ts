@@ -60,6 +60,16 @@ export class AuthController {
     return req.user;
   }
 
+  /**
+   * Refresh the current token - returns a new token with extended expiration
+   * Call this on app startup to keep the session alive
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('refresh')
+  async refreshToken(@Request() req: any) {
+    return this.authService.refreshToken(req.user.id);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
   updateProfile(@Request() req: any, @Body() updateProfileDto: UpdateProfileDto) {

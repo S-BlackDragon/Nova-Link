@@ -203,6 +203,23 @@ export class AuthService {
     };
   }
 
+  /**
+   * Refresh token - generates a new token with fresh expiration
+   * Called on app startup to extend the session
+   */
+  async refreshToken(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const payload = { sub: user.id, username: user.username };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+      user: { id: user.id, username: user.username, email: user.email, avatarUrl: user.avatarUrl },
+    };
+  }
+
   async forgotPassword(email: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
