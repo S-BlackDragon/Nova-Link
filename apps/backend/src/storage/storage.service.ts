@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as crypto from 'crypto';
+import * as path from 'path';
 
 @Injectable()
 export class StorageService {
@@ -29,10 +30,20 @@ export class StorageService {
     async getPresignedUploadUrl(
         userId: string,
         contentType: string,
+        filename?: string,
     ): Promise<{ uploadUrl: string; key: string; publicUrl: string }> {
-        // Generate unique key: avatars/userId/timestamp-random.ext
-        const ext = this.getExtensionFromMime(contentType);
-        const key = `${userId}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+        // Generate key
+        let key: string;
+
+        if (filename && filename.trim().length > 0) {
+            // Sanitize filename: keep alphanumeric, dots, dashes, underscores
+            // Use path.basename to prevent directory traversal
+            const safeName = path.basename(filename).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+            key = `${userId}/${safeName}`;
+        } else {
+            const ext = this.getExtensionFromMime(contentType);
+            key = `${userId}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+        }
 
         const command = new PutObjectCommand({
             Bucket: this.bucket,

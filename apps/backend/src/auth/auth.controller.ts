@@ -103,11 +103,12 @@ export class AuthController {
   async getAvatarUploadUrl(
     @Request() req: any,
     @Query('contentType') contentType: string,
+    @Query('filename') filename?: string,
   ) {
     if (!contentType || !contentType.startsWith('image/')) {
       throw new BadRequestException('Valid image content type is required');
     }
-    return this.storageService.getPresignedUploadUrl(req.user.id, contentType);
+    return this.storageService.getPresignedUploadUrl(req.user.id, contentType, filename);
   }
 
   /**

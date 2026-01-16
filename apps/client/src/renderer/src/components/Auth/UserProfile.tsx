@@ -19,6 +19,7 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
+    const [cacheBuster, setCacheBuster] = useState(Date.now());
 
     // Profile State
     const [username, setUsername] = useState(user?.username || '');
@@ -90,7 +91,7 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
         try {
             // 1. Get pre-signed upload URL from backend
             const urlResponse = await axios.get(
-                `${API_BASE_URL}/auth/avatar-upload-url?contentType=${encodeURIComponent(file.type)}`,
+                `${API_BASE_URL}/auth/avatar-upload-url?contentType=${encodeURIComponent(file.type)}&filename=${encodeURIComponent(file.name)}`,
                 { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
             );
 
@@ -121,6 +122,7 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
             const cleanUrl = freshUrl.replace(/https?:\/\/163\.192\.96\.105(:\d+)?/, '');
 
             setAvatarUrl(cleanUrl);
+            setCacheBuster(Date.now());
             onUpdate({ ...confirmResponse.data, avatarUrl: cleanUrl });
         } catch (err: any) {
             console.error('Upload failed:', err);
@@ -271,7 +273,7 @@ export default function UserProfile({ isOpen, onClose, user, onUpdate }: UserPro
                                     <div className="relative group">
                                         <div className="w-24 h-24 bg-gradient-to-br from-slate-700 to-slate-800 rounded-3xl flex items-center justify-center border-2 border-white/10 shadow-xl overflow-hidden">
                                             {getAvatarUrl(avatarUrl) ? (
-                                                <img src={getAvatarUrl(avatarUrl)!} alt="Avatar" className="w-full h-full object-cover" />
+                                                <img src={`${getAvatarUrl(avatarUrl)!}?v=${cacheBuster}`} alt="Avatar" className="w-full h-full object-cover" />
                                             ) : (
                                                 <span className="text-white font-black text-3xl">{username?.[0]?.toUpperCase()}</span>
                                             )}
